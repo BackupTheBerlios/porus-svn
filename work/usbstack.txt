@@ -51,6 +51,26 @@ When PORUS calls you with `buf` of 0, there are a few possible reasons:
 Data transmission on bulk endpoints
 -----------------------------------
 
+By the time the stack receives word that an IN packet has been received, it is already too late to request data for it, unless data to be transmitted has been prepared ahead of time.  Also, on most hardware, the mere arrival of an IN packet does not trigger an interrupt, so there is no way to find out when an IN packet arrives.
+
+Therefore, if you have data to transmit, you must prepare it ahead of time.  Construct your protocol so that a control command causes the device to prepare data to transmit.
+
+In many cases you will have more data to transmit than will fit in a single USB packet.  To handle this, the stack uses callbacks to move the data along.
+
+To handle this, we use a model called a *source block*.  Think of the source block as a piece of audio tape.  Each endpoint has a read head, which travels across the tape in one direction.  You call functions to position the head on the tape and define the length of tape it will read.
+
+After this, the endpoint waits for IN packets.  Each time it gets one, it returns as much data from the tape as it can, advancing the head accordingly.  Eventually the head will reach the end of its tape; the process then stops and the endpoint returns NAKs for IN requests.
+
+Even before the head reaches the end of its tape, you can call the same function to reposition the head, perhaps on a completely different piece of tape.
+
+In reality, the "tape" is a portion of memory -- a source block -- and the "head" is code and data in PORUS.  You can set an endpoint to read any portion and any length of memory, depending on your system.
+
+Repositioning the "head" causes PORUS to cancel the current transaction and start a new one.  It can't cancel in-progress IN packets, but it can stop new ones from going out.
+
+PORUS handles all this asynchronously.  If you want to be notified when it is done with a source block, you can set a callback.
+
+* * * old text * * *
+
 In USB, a device cannot send data asynchronously to the host.  It may only send data when the host specifically requests it, using an IN token.
 
 This does not mean that we use callbacks to request data.  Such callbacks would have to be made in anticipation of a future IN token.  We cannot, in general, make reasonable guesses about this, except in the case of isochronous IN endpoints, where IN tokens can reliably be anticipated.  We therefore provide functions for data transmission, which you may call at your leisure.  We use callbacks to notify you that a packet has been sent.

@@ -2,6 +2,8 @@
 #ifndef GUARD_usbtypes_h
 #define GUARD_usbtypes_h
 
+// :mode=c:
+
 #include "types.h"
 
 //! USB states
@@ -277,18 +279,20 @@ typedef struct usb_setup_t {
 //! Receive callback
 /*!
 \param[in] ep Endpoint number.  Useful when multiple endpoints call the same callback.
-\param[in] buf Pointer to the packet that was just received, or 0.
+\param[out] buf Pointer to the packet that was just received, or 0.
 \return Pointer to a packet structure which is ready to receive data, or 0.
 */
-typedef usb_buffer_t (*usb_cb_out)(int ep, usb_buffer_t buf);
+typedef usb_buffer_t (*usb_cb_out)(int epn, usb_buffer_t buf);
 
 //! Transmit callback
 /*!
-\param[in] ep Endpoint number.  Useful when multiple endpoints call the same callback.
-\param[in] buf Pointer to the packet that was just transmitted, or 0.
-\return Pointer to a new packet to transmit, or 0.
+\param[in] epn Endpoint number.  Useful when multiple endpoints call the same callback.
+\param[out] buf Pointer to the packet that was just transmitted, or 0.  A new transmit 
+	buffer is returned through this.
+\param[out] len Requested length is passed here.  Return the length of a new buffer through this.
+\return -1, indicating no data, or 0, indicating success.
 */
-typedef usb_buffer_t (*usb_cb_in)(int ep, usb_buffer_t buf);
+typedef int (*usb_cb_in)(int epn, u32 *buf, u16 *len);
 
 //! SOF callback
 /*! Called when a SOF (start-of-frame) token is received.  This is called at 
@@ -306,16 +310,24 @@ endpoints.
 typedef int (*usb_cb_ctl)(usb_setup_t *s);
 
 typedef void (*usb_cb_state)(int state);
+typedef void (*usb_cb_done)(int epn);
 
 typedef struct usb_endpoint_data_t {
 	union {
 		usb_cb_out o;
 		usb_cb_in i;
 	} cb;
-	unsigned int goBusy:1,
-		reloadBusy:1;
+	unsigned int bulkInProgress:1,
+		stop:1;
 	usb_data_t *go;
 	usb_buffer_t reload;
+	u32 buf;
+	// buflen = length of buffer in bytes
+	// count = no. of bytes transmitted / received
+	// rldBuflen = next buffer length
+	unsigned long buflen, count;
+	u16 lastlen; // length of last actual packet DMAed
+	usb_cb_done doneCallback;
 } usb_endpoint_data_t;
 
 typedef struct usb_endpoint_t {

@@ -18,10 +18,16 @@
 #define USBIDLECTL_IDLEEN	(1<<0)
 
 #define USBDMA(ep,reg)	USBREG(((ep)*8+(reg)))
+#define usb_dma_set_ptr(ep,adr) \
+	USBDMA(ep,USBODADH)=(adr>>16)&0xff; USBDMA(ep,USBODADL)=(adr)&0xffff;
+#define usb_dma_ptr(ep) \
+	((u32)(USBDMA(ep,USBODADH))<<16|USBDMA(ep,USBODADL))
+#if 0
 #define usb_dma_ptr(ep) \
 	(void *)(((long)(USBDMA(ep,USBODADH))<<15|USBDMA(ep,USBODADL))>>1)
 #define usb_dma_set_ptr(ep,adr) \
 	USBDMA(ep,USBODADH)=(((unsigned long)(adr))>>15)&0xff; USBDMA(ep,USBODADL)=(((unsigned long)(adr))<<1)&0xffff;
+#endif
 #define usb_dma_rld_ptr(ep) \
 	(void *)((USBDMA(ep,USBODRAH)<<8|USBDMA(ep,USBODRAL))>>1)
 #define usb_dma_set_rld_ptr(ep,adr) \

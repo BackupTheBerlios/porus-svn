@@ -4,7 +4,6 @@
 
 static usb_cb_sof sofCB, preSOFCB;
 static usb_cb_state stateChangeCallback;
-static int locklevel;
 static int usbState, usbSuspended;
 static u8 usbAddress;
 static u8 usbConfig; // config number
@@ -20,17 +19,11 @@ int usb_ctl(usb_setup_t *setup);
 
 void usb_lock(void)
 {
-	if (++locklevel) IRQ_disable(IRQ_EVT_USB);
+	IRQ_disable(IRQ_EVT_USB);
 }
 
 void usb_unlock(void)
 {
-	if (locklevel--<=1) IRQ_enable(IRQ_EVT_USB);
-}
-
-void usb_unlock_all(void)
-{
-	locklevel=0;
 	IRQ_enable(IRQ_EVT_USB);
 }
 
@@ -187,41 +180,41 @@ static void usb_resume(void)
 	usb_set_state_unsuspend();
 }
 
+#if 0
 int usb_is_buf_idle(int epn, usb_data_t *buf)
 {
 	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
 
 	if (!ep) return -1;
-	if (!buf&7) return -1;
 	if (epn>8) {
 		if (ep->data->go!=buf) return 1;
-		if (ep->data->goBusy) return 0;
 		//if (usb_buf_data(buf)!=usb_dma_ptr(epn)) return 1;
 	} else {
 		if (buf!=usb_dma_ptr(epn)) return 1;
 	}
 	return (!(USBDMA(epn,USBODCTL)&USBODCTL_GO));
 }
+#endif
 
-static void epGo(int epn, usb_endpoint_t *ep, usb_buffer_t buf)
+static void epGo(int epn, usb_endpoint_t *ep, u32 data, u16 len)
 {
-	ep->data->go=buf;
-	usb_dma_set_ptr(epn,buf);
-	ep->data->goBusy=1;
+	//ep->data->go=data;
+	usb_dma_set_ptr(epn,data);
 	/* this should not even work, but in fact it's required */
 	USBDMA(epn,USBODCT)=0;
-	USBDMA(epn,USBODSIZ)=ep->packetSize;
+	USBDMA(epn,USBODSIZ)=len;
 	USBDMA(epn,USBODCTL)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END;
 }
 
-static void epReload(int epn, usb_endpoint_t *ep, usb_buffer_t buf)
+static void epReload(int epn, usb_endpoint_t *ep, usb_data_t *data, u16 len)
 {
-	ep->data->reload=buf;
-	usb_dma_set_rld_ptr(epn,buf);
-	USBDMA(epn,USBODRSZ)=ep->packetSize;
+	//ep->data->reload=buf;
+	usb_dma_set_rld_ptr(epn,data);
+	USBDMA(epn,USBODRSZ)=len;
 	USBDMA(epn,USBODCTL)|=USBODCTL_RLD;
 }
 
+// FIXME: make isrOUT work again
 static void isrOUT(int epn)
 {
 	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
@@ -233,82 +226,168 @@ static void isrOUT(int epn)
 	dctl=USBDMA(epn,USBODCTL);
 	if (!(dctl&USBODCTL_GO)) {
 		// no transfers, so start one
-		buf=ep->data->cb.o(epn,0);
-		if (!buf) return; // oops, no buffer, oh well
-		epGo(epn,ep,buf);
+		//buf=ep->data->cb.o(epn,0);
+		//if (!buf) return; // oops, no buffer, oh well
+		//epGo(epn,ep,buf);
 	}
 }
 
 static void isrIN(int epn)
 {
 	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
-	usb_cb_in cb;
-	usb_buffer_t buf;
 
 	if (!ep) return;
-	cb=ep->data->cb.i;
-	if (!cb) return;
-	// ### this isn't done yet!
+	//if (!inCallback) return;
+	//if (ep->data->goBusy||ep->data->reloadBusy) return;
+
+	// looks like we're all done, signal it
+	//inCallback(epn,0,0);
 }
 
 void usb_tx_cancel(u8 epn)
 {
 	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
 
-	if (!(epn&7)) return;
+	if (epn<9) return;
 	if (!ep) return;
-	if (epn>8) {
-		if (USBDMA(epn,USBIDCTL)&USBIDCTL_GO)
-			USBDMA(epn,USBIDCTL)|=USBIDCTL_STP;
-		USBEPDEF(epn,USBICTX)|=USBICTX_NAK;
-		USBEPDEF(epn,USBICTY)|=USBICTY_NAK;
-		ep->data->goBusy=0;
+	ep->data->stop=1;
+	if (USBDMA(epn,USBIDCTL)&USBIDCTL_GO) {
+		USBDMA(epn,USBIDCTL)|=USBIDCTL_STP;
+		USBDMA(epn,USBIDCTL)&=~USBIDCTL_RLD;
 	}
+	USBEPDEF(epn,USBICTX)|=USBICTX_NAK;
+	USBEPDEF(epn,USBICTY)|=USBICTY_NAK;
 }
 
-int usb_tx(u8 epn, usb_data_t *data, u16 len)
+void usb_bulk_tx_cancel(u8 epn)
+{
+	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
+	usb_endpoint_data_t *epd;
+
+	if (!ep) return;
+	if (epn<9) return;
+	if (!ep->data->bulkInProgress) return;
+
+	usb_tx_cancel(epn);
+	epd=ep->data;
+	epd->buf=0;
+	epd->buflen=0;
+}
+
+// len==0 means the transfer is done. return 0 in this case.
+// 0  = ok
+// -1 = no more data
+// -2 = invalid endpoint
+// -3 = bad parameters
+static int usb_bulk_in(int epn, u32 *buf, u16 *len)
 {
 	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
 
-	if (!ep) return -1;
-	//### TODO: support reload
-	if (ep->data->goBusy) return -2;
-	ep->data->goBusy=1;
-	ep->data->go=data;
-	usb_dma_set_ptr(epn,data);
-	USBDMA(epn,USBIDCT)=0;
-	USBDMA(epn,USBIDSIZ)=len;
-	USBDMA(epn,USBIDCTL)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END;
+	if (!ep) return -2;
+	if (epn<9) return -2;
+
+	if (!len) {
+		ep->data->bulkInProgress=0;
+		return 0;
+	}
+	if (!buf) return -3;
+	if (ep->data->count>=ep->data->buflen) {
+		*buf=0;
+		ep->data->buf=0;
+		return -1;
+	}
+	*buf=ep->data->buf+(ep->data->count);
+	*len=ep->data->buflen;
+	if (*len>(ep->data->buflen-ep->data->count))
+		*len=ep->data->buflen-ep->data->count;
+	ep->data->count+=*len;
 	return 0;
 }
 
-static void isrDMAINGO(int epn)
+/*
+static void usb_tx_start(u8 epn, usb_endpoint_t *ep, u16 len)
+{
+	if (ep->data->rldBuf) {
+		ep->data->buf=ep->data->rldBuf;
+		ep->data->buflen=ep->data->rldBuflen;
+		ep->data->rldBuf=0;
+		ep->data->rldBuflen=0;
+		ep->data->count=0;
+		ep->data->bulkInProgress=1;
+		epGo(epn,ep,ep->data->buf,len);
+	} else {
+		ep->data->buf=0;
+		ep->data->bulkInProgress=0;
+	}
+}
+*/
+
+static void nextDMAIN(u8 epn, usb_endpoint_t *ep, int rld)
+{
+	u32 data;
+	u16 len;
+
+	if (!ep->data->cb.i) return;
+	len=ep->packetSize;
+	if (ep->data->cb.i(epn,&data,&len)) {
+		ep->data->buf=0;
+		ep->data->bulkInProgress=0;
+		if (ep->data->doneCallback)
+			ep->data->doneCallback(epn);
+		if (ep->data->lastlen>=ep->packetSize) {
+			data=0;
+			len=0;
+		} else
+			return;
+	}
+	ep->data->bulkInProgress=1;
+	ep->data->lastlen=len;
+	/*
+	if (rld)
+		epReload(epn,ep,data,len);
+	else
+		epGo(epn,ep,data,len);
+	*/
+	epGo(epn,ep,data,len);
+}
+
+static void isrDMAIN(u8 epn, int rld)
 {
 	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
 
 	if (!ep) return;
 
-	ep->data->goBusy=0;
+	if (!ep->data->stop)
+		nextDMAIN(epn,ep,0);
 }
 
-/* we only get this if there was no reload */
-static void isrDMAOUTGO(int epn)
+//! Point the endpoint to a new memory block
+/*!
+*/
+void usb_bulk_tx(u8 epn, u32 data, u32 len)
 {
 	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
-	usb_buffer_t buf;
-	
+
 	if (!ep) return;
+	if (epn<9) return;
 	
-	buf=ep->data->cb.o(epn,ep->data->go);
-	if (!buf) return;
-	epGo(epn,ep,buf);
+	if (ep->data->bulkInProgress)
+		usb_tx_cancel(epn);
+	ep->data->buf=data;
+	ep->data->buflen=len;
+	ep->data->count=0;
+	nextDMAIN(epn,ep,0);
+	//if (ep->data->lastlen>=ep->packetSize)
+	//	nextDMAIN(epn,ep,1);
 }
 
+// FIXME: make OUT DMA work
+/*
 static void isrDMAOUTRLD(int epn)
 {
 	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
 	usb_buffer_t buf;
-	
+
 	if (!ep) return;
 
 	buf=ep->data->cb.o(epn,ep->data->go); // a go did complete ...
@@ -317,11 +396,34 @@ static void isrDMAOUTRLD(int epn)
 	epReload(epn,ep,buf);
 }
 
+
+static void isrDMAOUT(u8 epn, int rld)
+{
+	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
+	usb_buffer_t buf;
+
+	// TODO: merge these
+	if (rld) {
+		//isrDMAOUTRLD(epn);
+		return;
+	}
+	if (!ep) return;
+
+	if (!ep->data->cb.o) return;
+	buf=ep->data->cb.o(epn,ep->data->go);
+	if (!buf) return;
+	epGo(epn,ep,buf);
+}
+*/
+
 void usb_isr(void)
 {
 	u8 src=USBINTSRC;
 	
 	if (!src) return;
+	if (src>=0x4f) return;
+	usb_lock();
+	HWI_enable();
 	if (src<0x12) { // bus interrupts
 		switch(src) {
 		case 2: // OUT0
@@ -352,27 +454,37 @@ void usb_isr(void)
 			preSOFCB();
 			break;
 		default: // spurious / unknown ..
+			usb_unlock();
 			return;
 		}
 	} else if (src<0x2E) { // endpoint interrupt
-		if (src&1) // spurious
+		if (src&1) { // spurious
+			usb_unlock();
 			return;
+		}
 		src=(src-0x10)>>1; // src is now the endpoint number
 		if (src&8) isrIN(src);
 		else isrOUT(src);
 	} else if (src<0x4f) { // dma
-		if (src<0x32) return; // spurious
+		if (src<0x32) {
+			usb_unlock();
+			return; // spurious
+		}
 		src-=0x30;
 		if (src&1) { // go
 			src>>=1;
-			if (src<8) isrDMAOUTGO(src);
-			else isrDMAINGO(src);
+			// FIXME: make OUT DMA work again
+			if (src<8) { ; //isrDMAOUT(src,0);
+			}
+			else isrDMAIN(src,0);
 		} else {
 			src>>=1;
-			if (src<8) isrDMAOUTRLD(src);
-			//else isrDMAINRLD(src);
+			if (src<8) { ; //isrDMAOUT(src,1);
+			}
+			else isrDMAIN(src,1);
 		}
 	}
+	usb_unlock();
 }
 
 void usb_set_sof_cb(usb_cb_sof cb)
@@ -417,8 +529,8 @@ static int activateInEp(int epn, usb_endpoint_t *ep)
 	USBDMA(epn,USBIDADH)=0;
 	USBDMA(epn,USBIDADL)=0;
 	USBDMA(epn,USBIDSIZ)=0;
-	USBEPDEF(epn,USBICTX)=0;
-	USBEPDEF(epn,USBICTY)=0;
+	USBEPDEF(epn,USBICTX)=0x80;
+	USBEPDEF(epn,USBICTY)=0x80;
 	USBEPDEF(epn,USBICNF)|=USBICNF_UBME;
 	USBIEPIE|=1<<(epn&7);
 	USBIDIE|=1<<(epn&7);
@@ -635,17 +747,26 @@ int usb_set_in_cb(int cfg, int epn, usb_cb_in cb)
 	usb_endpoint_t *ep=usb_get_ep(cfg,epn);
 	
 	if (!ep) return -1;
-	if (epn<8) return -1;
+	if (epn<9) return -1;
 	if (usbState!=USB_STATE_CONFIGURED) {
 		ep->data->cb.i=cb;
 	} if (!cb) {
 		USBIEPIE&=~(1<<(epn&7));
 		ep->data->cb.o=0;
 	} else {
-		ep->data->cb.o=cb;
+		ep->data->cb.o=0; // FIXME: this is wrong!
 		USBIEPIE|=1<<(epn&7);
 	}
 	return 0;
+}
+
+void usb_set_txdone_cb(int epn, usb_cb_done cb)
+{
+	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
+
+	if (!ep) return;
+	if (epn<9) return;
+	ep->data->doneCallback=cb;
 }
 
 void usb_dev_reset(void)
@@ -704,7 +825,6 @@ void usb_init(void)
 	usbConfig=0;
 	usbSuspended=0;
 	usbAddress=0;
-	locklevel=0;
 	sofCB=preSOFCB=0;
 	usb_set_ctl_class_cb(0);
 	usb_set_ctl_vendor_cb(0);
@@ -717,9 +837,16 @@ void usb_init(void)
 		ep=usb_get_ep(1,i);
 		if (!ep) continue;
 		ep->data->go=0;
-		ep->data->goBusy=0;
-		ep->data->reloadBusy=0;
 		ep->data->reload=0;
-		ep->data->cb.o=0;
+		if (i>8) {
+			ep->data->cb.i=usb_bulk_in;
+			ep->data->bulkInProgress=0;
+			ep->data->stop=0;
+			ep->data->buf=0;
+			ep->data->buflen=0;
+			ep->data->count=0;
+			ep->data->doneCallback=0;
+			ep->data->lastlen=0;
+		}
 	}
 }

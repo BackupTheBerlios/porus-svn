@@ -121,7 +121,7 @@ static int usb_ctl_std_clear_feature(usb_setup_t *setup)
 		if (setup->recipient!=USB_RCPT_EP) return -1;
 		epn=setup->index;
 		if (epn&0x80) epn=(epn&15)+8;
-		if (usb_stall(epn))
+		if (usb_unstall(epn))
 			return -1;
 		break;
 	case FEATURE_DEVICE_REMOTE_WAKEUP:
@@ -146,7 +146,7 @@ static int usb_ctl_std_set_feature(usb_setup_t *setup)
 		if (setup->recipient!=USB_RCPT_EP) return -1;
 		epn=setup->index;
 		if (epn&0x80) epn=(epn&15)+8;
-		if (usb_unstall(epn))
+		if (usb_stall(epn))
 			return -1;
 		break;
 	case FEATURE_DEVICE_REMOTE_WAKEUP:

@@ -8,6 +8,9 @@
 //! Initialisation function
 void usb_init(void);
 
+void usb_lock(void);
+void usb_unlock(void);
+
 void usb_set_sof_cb(usb_cb_sof cb);
 void usb_set_presof_cb(usb_cb_sof cb);
 
@@ -18,7 +21,11 @@ int usb_is_stalled(u8 epnum);
 int usb_get_state(void);
 int usb_get_config(void);
 
-int usb_tx(u8 epnum, usb_data_t *data, u16 len);
+//int usb_tx(u8 epnum, usb_data_t *data, u16 len);
+void usb_bulk_tx(u8 epn, u32 data, u32 len);
+
+//! Immediately stop the endpoint from sending data
+void usb_bulk_tx_cancel(u8 epn);
 
 void usb_dev_reset(void);
 void usb_attach(void);
@@ -33,6 +40,7 @@ void usb_set_ctl_vendor_cb(usb_cb_ctl cb);
 void usb_set_ctl_vendor_write_cb(usb_cb_ctl cb);
 void usb_set_ctl_vendor_read_cb(usb_cb_ctl cb);
 void usb_set_state_cb(usb_cb_state cb);
+void usb_set_txdone_cb(int epn, usb_cb_done cb);
 
 //void usb_sched(void);
 
