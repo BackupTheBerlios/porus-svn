@@ -69,7 +69,7 @@ default_iface={
 	'subclassCode':0xff,
 	'protocolCode':0xff,
 	'desc':'',
-	'endpoint':None
+	'endpoint':tuple()
 	# assigned opts:
 	# numEndpoints - number of endpoints
 	# number - used for bInterfaceNumber; starts from 0

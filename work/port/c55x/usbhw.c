@@ -160,18 +160,25 @@ int usbhw_get_ctl_write_data(u8 *len, usb_data_t *d)
 	return 0;
 }
 
+void usbhw_ctl_end_write_data(void)
+{
+	USBCTL|=USBCTL_DIR;
+	USBOCT0=USBOCT0_NAK;
+	USBICT0=USBICT0_NAK;
+}
+
 void usbhw_ctl_write_handshake(void)
 {
 	USBOCT0=USBOCT0_NAK;
 	USBICT0=0;
-	//USBCTL|=USBCTL_DIR;
+	USBCTL|=USBCTL_DIR;
 }
 
 void usbhw_ctl_read_handshake(void)
 {
 	USBICT0=USBICT0_NAK;
 	USBOCT0=0;
-	//USBCTL&=~USBCTL_DIR;
+	USBCTL&=~USBCTL_DIR;
 }
 
 #if 0

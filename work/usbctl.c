@@ -303,6 +303,7 @@ void usb_evt_ctl_rx(void)
 	ctlflags.ct+=l;
 	if (ctlflags.ct>=usb_setup.len) {
 		ctlflags.state=USB_CTL_STATE_RWD;
+		usbhw_ctl_end_write_data();
 		usb_ctl();
 	}
 }
