@@ -31,6 +31,9 @@ void usb_set_state(int state);
 void usb_set_address(u8 adr);
 int usb_set_config(int cfn);
 
+static usb_cb_ctl classCtlCallback, vendorCtlCallback;
+static usb_cb_ctl vendorCtlWriteCallback, vendorCtlReadCallback;
+
 usb_data_t txbuf[4];
 
 static void reply_u8(usb_setup_t *setup, u8 data)
@@ -211,7 +214,7 @@ static int usb_ctl_std_get_descriptor(usb_setup_t *setup)
 	return 0;
 }
 
-int usb_ctl_std(usb_setup_t *setup)
+static int usb_ctl_std(usb_setup_t *setup)
 {
 	int err;
 
@@ -250,4 +253,47 @@ int usb_ctl_std(usb_setup_t *setup)
 		break;
 	}
 	return err;
+}
+
+void usb_set_ctl_class_cb(usb_cb_ctl cb)
+{
+	classCtlCallback=cb;
+}
+
+void usb_set_ctl_vendor_cb(usb_cb_ctl cb)
+{
+	vendorCtlCallback=cb;
+}
+
+void usb_set_ctl_vendor_write_cb(usb_cb_ctl cb)
+{
+	vendorCtlWriteCallback=cb;
+}
+
+void usb_set_ctl_vendor_read_cb(usb_cb_ctl cb)
+{
+	vendorCtlReadCallback=cb;
+}
+
+int usb_ctl(usb_setup_t *setup)
+{
+	switch(setup->type) {
+	case USB_CTL_TYPE_STD:
+		return usb_ctl_std(setup);
+	case USB_CTL_TYPE_CLASS:
+		if (classCtlCallback)
+			return classCtlCallback(setup);
+		break;
+	case USB_CTL_TYPE_VENDOR:
+		if (setup->dataDir&&vendorCtlReadCallback)
+			return vendorCtlReadCallback(setup);
+		else if (vendorCtlWriteCallback)
+			return vendorCtlWriteCallback(setup);
+		else if (vendorCtlCallback)
+			return vendorCtlCallback(setup);
+		break;
+	default:
+		break;
+	}
+	return -1;
 }

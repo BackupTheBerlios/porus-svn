@@ -2,7 +2,6 @@
 #include "usb.h"
 #include "usb_5509.h"
 
-static usb_cb_ctl stdCtlCallback, classCtlCallback, vendorCtlCallback;
 static usb_cb_sof sofCB, preSOFCB;
 static usb_cb_state stateChangeCallback;
 static int locklevel;
@@ -17,7 +16,7 @@ static usb_data_t ctlRxBuf[usb_mem_len(USB_CTL_PACKET_SIZE)];
 void usb_set_state_unsuspend(void);
 void usb_set_state(int state);
 void usb_set_address(u8 adr);
-int usb_ctl_std(usb_setup_t *setup);
+int usb_ctl(usb_setup_t *setup);
 
 void usb_lock(void)
 {
@@ -41,25 +40,6 @@ static void usb_ctl_stall(void)
 	USBOCNF0|=USBOCNF0_STALL;
 }
 
-static int ctlCallback(usb_setup_t *setup)
-{
-	switch(setup->type) {
-	case USB_CTL_TYPE_STD:
-		return stdCtlCallback(setup);
-	case USB_CTL_TYPE_CLASS:
-		if (classCtlCallback)
-			return classCtlCallback(setup);
-		break;
-	case USB_CTL_TYPE_VENDOR:
-		if (vendorCtlCallback)
-			return vendorCtlCallback(setup);
-		break;
-	default:
-		break;
-	}
-	return -1;
-}
-
 static void isrOUT0(void)
 {
 	int i;
@@ -68,7 +48,7 @@ static void isrOUT0(void)
 	  setup txn */
 	// stall if there wasn't supposed to be a data phase, or if we 
 	//   have no callback
-	if (!ctlCallback||!usbSetup.len) {
+	if (!usbSetup.len) {
 		usb_ctl_stall();
 		return;
 	}
@@ -94,14 +74,14 @@ static void isrOUT0(void)
 	usbSetup.dataofs=0;
 	usbSetup.data=ctlRxBuf;
 	// go get the next ptr
-	if (ctlCallback(&usbSetup)) usb_ctl_stall();
+	if (usb_ctl(&usbSetup)) usb_ctl_stall();
 }
 
 static void isrIN0(void)
 {
 	int i,l;
 
-	if (!ctlCallback||!usbSetup.len||!usbSetup.data) {
+	if (!usbSetup.len||!usbSetup.data) {
 		usb_ctl_stall();
 		return;
 	}
@@ -124,7 +104,7 @@ static void isrIN0(void)
 	}
 	if (usbSetup.datalen==USB_CTL_PACKET_SIZE) {
 		usbSetup.phase=USB_CTL_PHASE_IN;
-		if (ctlCallback(&usbSetup)) usb_ctl_stall();
+		if (usb_ctl(&usbSetup)) usb_ctl_stall();
 	} else {
 		usbSetup.dataofs+=l;
 	}
@@ -133,8 +113,6 @@ static void isrIN0(void)
 static void isrSetup(void)
 {
 	u8 b;
-
-	if (!ctlCallback) usb_ctl_stall();
 
 	USBCTL|=USBCTL_SETUP;
 	b=USBBUFSETUP(0);
@@ -161,7 +139,7 @@ static void isrSetup(void)
 		usbSetup.datalen=usbSetup.len;	// set up datalen, clamp to max packet size
 		if (usbSetup.datalen>USB_CTL_PACKET_SIZE)
 			usbSetup.datalen=USB_CTL_PACKET_SIZE;
-		if (ctlCallback(&usbSetup)) {
+		if (usb_ctl(&usbSetup)) {
 			usb_ctl_stall();
 			return;
 		}
@@ -175,7 +153,7 @@ static void isrSetup(void)
 		} else {		// not expecting data
 			/* we do this first so we can go to address state if nec.
 			   also we should keep naking until we have something ready ... */
-			if (ctlCallback(&usbSetup)) usb_ctl_stall(); // dispatch now
+			if (usb_ctl(&usbSetup)) usb_ctl_stall(); // dispatch now
 			USBICT0=0;	// expecting an IN handshake
 		}
 	}
@@ -271,6 +249,21 @@ static void isrIN(int epn)
 	cb=ep->data->cb.i;
 	if (!cb) return;
 	// ### this isn't done yet!
+}
+
+void usb_tx_cancel(u8 epn)
+{
+	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
+
+	if (!(epn&7)) return;
+	if (!ep) return;
+	if (epn>8) {
+		if (USBDMA(epn,USBIDCTL)&USBIDCTL_GO)
+			USBDMA(epn,USBIDCTL)|=USBIDCTL_STP;
+		USBEPDEF(epn,USBICTX)|=USBICTX_NAK;
+		USBEPDEF(epn,USBICTY)|=USBICTY_NAK;
+		ep->data->goBusy=0;
+	}
 }
 
 int usb_tx(u8 epn, usb_data_t *data, u16 len)
@@ -713,8 +706,10 @@ void usb_init(void)
 	usbAddress=0;
 	locklevel=0;
 	sofCB=preSOFCB=0;
-	stdCtlCallback=usb_ctl_std;
-	classCtlCallback=vendorCtlCallback=0;
+	usb_set_ctl_class_cb(0);
+	usb_set_ctl_vendor_cb(0);
+	usb_set_ctl_vendor_write_cb(0);
+	usb_set_ctl_vendor_read_cb(0);
 	stateChangeCallback=0;
 
 	// ### TODO: need to do this for all configurations

@@ -28,8 +28,10 @@ void usb_remote_wakeup(void);
 
 int usb_set_out_cb(int cfg, int epn, usb_cb_out cb);
 int usb_set_in_cb(int cfg, int epn, usb_cb_in cb);
-int usb_set_ctl_class_cb(usb_cb_ctl cb);
-int usb_set_ctl_vendor_cb(usb_cb_ctl cb);
+void usb_set_ctl_class_cb(usb_cb_ctl cb);
+void usb_set_ctl_vendor_cb(usb_cb_ctl cb);
+void usb_set_ctl_vendor_write_cb(usb_cb_ctl cb);
+void usb_set_ctl_vendor_read_cb(usb_cb_ctl cb);
 void usb_set_state_cb(usb_cb_state cb);
 
 //void usb_sched(void);
