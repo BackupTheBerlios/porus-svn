@@ -119,7 +119,7 @@ This blocks until the copy is complete.
 
 \retval -1 More data received than expected
 */
-int usbhw_get_ctl_write_data(u8 *len, usb_data_t *d);
+int usbhw_get_ctl_write_data(u8 *len, usb_data_t *d, int last);
 
 //! Handshake a write transaction
 /*! Causes an ACK handshake to appear for a write transaction. */

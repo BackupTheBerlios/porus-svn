@@ -289,6 +289,7 @@ int usb_ctl_std(void)
 void usb_evt_ctl_rx(void)
 {
 	u8 l;
+	int last;
 
 	if (ctlflags.state!=USB_CTL_STATE_WWD) {
 		usb_ctl_stall();
@@ -296,14 +297,15 @@ void usb_evt_ctl_rx(void)
 	}
 	l=usb_setup.len-ctlflags.ct;
 	if (l>USB_CTL_PACKET_SIZE) l=USB_CTL_PACKET_SIZE;
-	if (usbhw_get_ctl_write_data(&l,usb_ctl_write_data+usb_mem_len(ctlflags.ct))) {
+	ctlflags.ct+=l;
+	last=(ctlflags.ct>=usb_setup.len);
+	if (usbhw_get_ctl_write_data(&l,usb_ctl_write_data+usb_mem_len(ctlflags.ct),last)) {
 		usb_ctl_stall();
 		return;
 	}
 	ctlflags.ct+=l;
-	if (ctlflags.ct>=usb_setup.len) {
+	if (last) {
 		ctlflags.state=USB_CTL_STATE_RWD;
-		usbhw_ctl_end_write_data();
 		usb_ctl();
 	}
 }
