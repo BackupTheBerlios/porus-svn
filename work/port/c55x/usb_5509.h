@@ -2,8 +2,6 @@
 #ifndef GUARD_usb_5509_h
 #define GUARD_usb_5509_h
 
-#include "ads1271evm_mmb0cfg.h"
-
 #define USB_BASE 		0x5800
 
 #define IOTYPE 		ioport unsigned short *
@@ -114,7 +112,7 @@
 #define USBIDRAL(ep)		USBDMA(ep,6)
 #define USBIDRAH(ep)		USBDMA(ep,7)
 
-#define USBODCTL		USBDMA(ep,0)
+#define USBODCTL(ep)		USBDMA(ep,0)
 #define USBODCTL_PM		(1<<8)
 #define USBODCTL_EM		(1<<7)
 #define USBODCTL_SHT		(1<<6)
@@ -125,13 +123,13 @@
 #define USBODCTL_STP		(1<<1)
 #define USBODCTL_GO		(1<<0)
 
-#define USBODSIZ		USBDMA(ep,1)
-#define USBODADL		2
-#define USBODADH		3
-#define USBODCT		4
-#define USBODRSZ		5
-#define USBODRAL		6
-#define USBODRAH		7
+#define USBODSIZ(ep)		USBDMA(ep,1)
+#define USBODADL(ep)		USBDMA(ep,2)
+#define USBODADH(ep)		USBDMA(ep,3)
+#define USBODCT(ep)	USBDMA(ep,4)
+#define USBODRSZ(ep)		USBDMA(ep,5)
+#define USBODRAL(ep)		USBDMA(ep,6)
+#define USBODRAH(ep)		USBDMA(ep,7)
 
 // for USBEPDEF
 #define USBICNF(ep)		USBEPDEF(ep,0)

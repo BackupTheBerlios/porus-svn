@@ -2,6 +2,8 @@
 #ifndef GUARD_usbpriv_h
 #define GUARD_usbpriv_h
 
+#include "usbconfig.h"
+
 typedef struct usb_packet_req_t {
 	unsigned int done:1, // 0 = request waiting, 1 = request complete
 		timeout:1; // 0 = no timeout, 1 = timeout occured
@@ -10,23 +12,6 @@ typedef struct usb_packet_req_t {
 	u16 reqlen; // requested length in bytes
 	u16 actlen; // actual length in bytes
 } usb_packet_req_t;
-
-typedef struct usb_endpoint_data_t {
-	unsigned int xferInProgress:1;
-	usb_data_t *buf; // data ptr
-	// reqlen = length of buffer in bytes
-	// actlen = no. of bytes transmitted / received
-	u32 reqlen, actlen;
-	usb_cb_done done_cb;
-} usb_endpoint_data_t;
-
-typedef struct usb_endpoint_t {
-	unsigned int id:5, // endpoint number, 0-31
-		type:2; // endpoint type
-	unsigned short packetSize; // in bytes
-	usb_endpoint_data_t *data;
-	int in_timeout; // in frames
-} usb_endpoint_t;
 
 //! Called when data copy is done
 void usb_evt_txdone(usb_endpoint_t *ep);
@@ -56,9 +41,11 @@ void usb_evt_ctl_rxdone(void);
 void usb_evt_ctl_txdone(void);
 
 void usb_set_state(int state);
-int usb_get_state(void)
+int usb_get_state(void);
 void usb_set_address(u8 adr);
 int usb_set_config(int cfn);
-int usb_get_config(void)
+int usb_get_config(void);
+
+void usb_ctl_init(void);
 
 #endif

@@ -1,16 +1,97 @@
 
 #include "usbhw.h"
+#include <bios.h>
+#include <c55.h>
+#include <port/c55x/usb_5509.h>
 
-static usb_packet_req_t txpkt, rxpkt;
+#define pkt_from_pkt(P) ((usb_packet_req_t *)((P)->ep->data->hwdata))
 
-void usbhw_lock(void)
+void usbhw_int_dis(void)
 {
-	IRQ_disable(IRQ_EVT_USB);
+	C55_disableIER0(C55_IEN08);
 }
 
-void usbhw_unlock(void)
+void usbhw_int_en(void)
 {
-	IRQ_enable(IRQ_EVT_USB);
+	C55_enableIER0(C55_IEN08);
+}
+
+void usbhw_int_en_sof(void)
+{
+	USBIE|=USBIE_SOF;
+}
+
+void usbhw_int_en_presof(void)
+{
+	USBIE|=USBIE_PSOF;
+}
+
+void usbhw_int_en_txdone(int epn)
+{
+	if (epn<16||epn>23) return;
+	USBIEPIE|=(1<<(epn-16));
+}
+
+void usbhw_int_en_rxdone(int epn)
+{
+	if (epn<0||epn>7) return;
+	USBOEPIE|=(1<<epn);
+}
+
+void usbhw_int_en_setup(void)
+{
+	USBIE|=USBIE_SETUP;
+}
+
+void usbhw_int_en_ctlin(void)
+{
+	USBICNF0|=USBICNF0_INTE;
+	USBIEPIE|=1;
+}
+
+void usbhw_int_en_ctlout(void)
+{
+	USBOCNF0|=USBOCNF0_INTE;
+	USBOEPIE|=1;
+}
+
+void usbhw_int_dis_sof(void)
+{
+	USBIE&=~USBIE_SOF;
+}
+
+void usbhw_int_dis_presof(void)
+{
+	USBIE&=~USBIE_PSOF;
+}
+
+void usbhw_int_dis_txdone(int epn)
+{
+	if (epn<16||epn>23) return;
+	USBIEPIE&=~(1<<(epn-16));
+}
+
+void usbhw_int_dis_rxdone(int epn)
+{
+	if (epn<0||epn>7) return;
+	USBOEPIE&=~(1<<epn);
+}
+
+void usbhw_int_dis_setup(void)
+{
+	USBIE&=~USBIE_SETUP;
+}
+
+void usbhw_int_dis_ctlin(void)
+{
+	USBICNF0&=~USBICNF0_INTE;
+	USBIEPIE&=~1;
+}
+
+void usbhw_int_dis_ctlout(void)
+{
+	USBOCNF0&=~USBOCNF0_INTE;
+	USBOEPIE&=~1;
 }
 
 int usbhw_get_setup(usb_setup_t *s)
@@ -72,6 +153,7 @@ int usbhw_get_ctl_write_data(u8 *len, usb_data_t *d)
 			d[i>>1]=USBBUFOUT0(i)<<8;
 	}
 	USBOCT0&=~USBOCT0_NAK;
+	return 0;
 }
 
 void usbhw_ctl_write_handshake(void)
@@ -84,34 +166,25 @@ void usbhw_ctl_read_handshake(void)
 	USBOCT0=0;
 }
 
-static void epGo(int epn, usb_endpoint_t *ep, u32 data, u16 len)
-{
-	//ep->data->go=data;
-	usb_dma_set_ptr(epn,data);
-	/* this should not even work, but in fact it's required */
-	USBDMA(epn,USBODCT)=0;
-	USBDMA(epn,USBODSIZ)=len;
-	USBDMA(epn,USBODCTL)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END;
-}
-
+#if 0
 static void epReload(int epn, usb_endpoint_t *ep, usb_data_t *data, u16 len)
 {
 	//ep->data->reload=buf;
 	usb_dma_set_rld_ptr(epn,data);
-	USBDMA(epn,USBODRSZ)=len;
-	USBDMA(epn,USBODCTL)|=USBODCTL_RLD;
+	USBODRSZ(epn)=len;
+	USBODCTL(epn)|=USBODCTL_RLD;
 }
 
 // ### FIXME: make isrOUT work again
 static void isrOUT(int epn)
 {
-	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
+	usb_endpoint_t *ep=usb_get_ep(usb_get_config(),epn);
 	usb_buffer_t buf;
 	u16 dctl;
 	
 	if (!ep) return;
 
-	dctl=USBDMA(epn,USBODCTL);
+	dctl=USBODCTL(epn);
 	if (!(dctl&USBODCTL_GO)) {
 		// no transfers, so start one
 		//buf=ep->data->cb.o(epn,0);
@@ -119,35 +192,22 @@ static void isrOUT(int epn)
 		//epGo(epn,ep,buf);
 	}
 }
+#endif
 
-// ### FIXME: why is isrIN empty here?
-static void isrIN(int epn)
+void usbhw_cancel(usb_endpoint_t *ep)
 {
-	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
+	int epn=ep->id;
 
-	if (!ep) return;
-	//if (!inCallback) return;
-	//if (ep->data->goBusy||ep->data->reloadBusy) return;
-
-	// looks like we're all done, signal it
-	//inCallback(epn,0,0);
-}
-
-void usb_tx_cancel(u8 epn)
-{
-	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
-
-	if (epn<9) return;
-	if (!ep) return;
-	ep->data->stop=1;
-	if (USBDMA(epn,USBIDCTL)&USBIDCTL_GO) {
-		USBDMA(epn,USBIDCTL)|=USBIDCTL_STP;
-		USBDMA(epn,USBIDCTL)&=~USBIDCTL_RLD;
+	((usb_packet_req_t *)(ep->data->hwdata))->done=1;
+	if (USBIDCTL(epn)&USBIDCTL_GO) {
+		USBIDCTL(epn)|=USBIDCTL_STP;
+		USBIDCTL(epn)&=~USBIDCTL_RLD;
 	}
-	USBEPDEF(epn,USBICTX)|=USBICTX_NAK;
-	USBEPDEF(epn,USBICTY)|=USBICTY_NAK;
+	USBICTX(epn)|=USBICTX_NAK;
+	USBICTY(epn)|=USBICTY_NAK;
 }
 
+#if 0
 static void nextDMAIN(u8 epn, usb_endpoint_t *ep, int rld)
 {
 	u32 data;
@@ -186,15 +246,43 @@ static void isrDMAIN(u8 epn, int rld)
 	if (!ep->data->stop)
 		nextDMAIN(epn,ep,0);
 }
+#endif
+
+static void dmaGo(int epn, u32 data, u16 len)
+{
+	//usb_dma_set_ptr(epn,data);
+	USBODADL(epn)=data&0xffff;
+	USBODADH(epn)=(data>>16)&0xff;
+	/* this should not even work, but in fact it's required */
+	USBODCT(epn)=0;
+	USBODSIZ(epn)=len;
+	USBODCTL(epn)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END;
+}
 
 int usbhw_tx(usb_packet_req_t *pkt)
 {
-	if (!txpkt.done) return -1;
-	txpkt.ep=pkt.ep;
-	txpkt.data=pkt.data;
-	txpkt.reqlen=pkt.reqlen;
-	txpkt.actlen=0;
-	
+	usb_packet_req_t *txpkt=(usb_packet_req_t *)(pkt->ep->data->hwdata);
+
+	if (!txpkt->done) return -1;
+	txpkt->ep=pkt->ep;
+	txpkt->data=pkt->data;
+	txpkt->reqlen=pkt->reqlen;
+	txpkt->actlen=0;
+	dmaGo(pkt->ep->id,(u32)(txpkt->data)<<1,txpkt->reqlen);
+	return 0;
+}
+
+static void isrIN(int epn)
+{
+	usb_endpoint_t *ep;
+	usb_packet_req_t *txpkt;
+
+	ep=usb_get_ep(usb_get_config(),epn);
+	if (!ep) return;
+	txpkt=(usb_packet_req_t *)(ep->data->hwdata);
+	txpkt->done=1;
+	txpkt->actlen=txpkt->reqlen;
+	usb_evt_txdone(ep);
 }
 
 void usbhw_isr(void)
@@ -245,7 +333,8 @@ void usbhw_isr(void)
 		}
 		src=(src-0x10)>>1; // src is now the endpoint number
 		if (src&8) isrIN(src);
-		else isrOUT(src);
+		//else isrOUT(src);
+#if 0
 	} else if (src<0x4f) { // dma
 		if (src<0x32) {
 			//usb_unlock();
@@ -258,30 +347,27 @@ void usbhw_isr(void)
 			if (src<8) { ; //isrDMAOUT(src,0);
 			}
 			else isrDMAIN(src,0);
-		} else {
+		} else { // reload
 			src>>=1;
 			if (src<8) { ; //isrDMAOUT(src,1);
 			}
 			else isrDMAIN(src,1);
 		}
+#endif
 	}
 	//usb_unlock();
 }
 
-int usbhw_stall(int epn)
+void usbhw_stall(int epn)
 {
-	if (USBICNF(epn)&USBICNF_ISO)
-		return 0;
-	else
+	if (!(USBICNF(epn)&USBICNF_ISO))
 		USBICNF(epn)|=USBICNF_STALL;
 }
 
-int usbhw_unstall(int epn)
+void usbhw_unstall(int epn)
 {
-	if (USBEPDEF(epnum,USBICNF)&USBICNF_ISO)
-		return 0;
-	else
-		USBEPDEF(epnum,USBICNF)&=~USBICNF_STALL;
+	if (!(USBICNF(epn)&USBICNF_ISO))
+		USBICNF(epn)&=~USBICNF_STALL;
 }
 
 int usbhw_is_stalled(int epn)
@@ -292,13 +378,13 @@ int usbhw_is_stalled(int epn)
 		return USBICNF(epn)&USBICNF_STALL;
 }
 
-int usbhw_ctl_stall(void)
+void usbhw_ctl_stall(void)
 {
 	USBOCNF0|=USBOCNF0_STALL;
 	USBICNF0|=USBICNF0_STALL;
 }
 
-int usbhw_ctl_unstall(void)
+void usbhw_ctl_unstall(void)
 {
 	USBOCNF0&=~USBOCNF0_STALL;
 	USBICNF0&=~USBICNF0_STALL;
@@ -341,7 +427,7 @@ static int usbhw_alloc_ep_buf(int config, usb_endpoint_t *ep)
 	u16 ofs,b;
 
 	ofs=0;
-	oldep=-1;
+	oldep=0;
 	for (i=1;i<16;++i) {
 		if (i==8) continue;
 		b=usbhw_get_ep_buf_ofs(i);
@@ -357,16 +443,24 @@ static int usbhw_alloc_ep_buf(int config, usb_endpoint_t *ep)
 		ofs+=oldep->packetSize*2;
 	if (ofs+(ep->packetSize*2)>3584)
 		return -1;
-	usbhw_set_ep_buf_ofs(ofs);
+	usbhw_set_ep_buf_ofs(ep->id,ofs);
 	return 0;
 }
 
 int usbhw_activate_ep(usb_endpoint_t *ep)
 {
-	int epn=ep->id,config;
+	int epn=ep->id;
 	u8 cnf=0;
+	usb_packet_req_t *pkt;
 
-	if (usbhw_alloc_ep_buf(config,ep)) {
+	pkt=(usb_packet_req_t *)malloc(sizeof(usb_packet_req_t));
+	if (!pkt) {
+		USBICNF(epn)=0;
+		return -1;
+	}
+	ep->data->hwdata=(void *)pkt;
+	pkt->done=1;
+	if (usbhw_alloc_ep_buf(usb_get_config(),ep)) {
 		USBICNF(epn)=0;
 		return -1;
 	}
@@ -392,7 +486,7 @@ int usbhw_activate_ep(usb_endpoint_t *ep)
 	return 0;
 }
 
-int usbhw_deactivate_ep(usb_endpoint_t *ep)
+void usbhw_deactivate_ep(usb_endpoint_t *ep)
 {
 	USBICNF(ep->id)=0;
 }
@@ -426,7 +520,7 @@ void usbhw_attach(void)
 	USBIDLECTL=USBIDLECTL_USBRST; // un-reset the USB module
 	// in the POWERED state, we must respond only to 
 	// reset, suspend, and resume
-	IRQ_enable(IRQ_EVT_USB);
+	usbhw_int_en();
 	USBCTL|=USBCTL_FEN;
 	USBIE=USBIE_RSTR|USBIE_SUSR|USBIE_RESR;
 	USBCTL|=USBCTL_CONN;
@@ -437,11 +531,11 @@ void usbhw_detach(void)
 	// reset the module completely and keep it there
 	// (this also disconnects us)
 	USBIDLECTL&=~USBIDLECTL_USBRST;
-	IRQ_disable(IRQ_EVT_USB);
+	C55_disableIER0(C55_IEN08);
 }
 
 int usbhw_init(void *param)
 {
-	txpkt.done=1;
-	rxpkt.done=1;
+	usbhw_init_pll(*(unsigned int *)(param));
+	return 0;
 }

@@ -80,8 +80,12 @@ should be made active.
 
 This function is not called in response to a bus reset; usbhw_reset() is 
 called for that.
+
+\param[in] parms Platform-specific parameters
+\retval 0 Successful
+\retval -1 Error
 */
-void usbhw_init(void *parms);
+int usbhw_init(void *parms);
 
 //! Respond to a bus reset
 /*! Do anything needed on the hardware in response to a bus reset.  This 
@@ -134,12 +138,12 @@ void usbhw_ctl_read_handshake(void);
 //! Stall endpoint
 /*! Stall the given endpoint.  Does not apply to control endpoints; use 
 usbhw_ctl_stall() on those. */
-int usbhw_stall(int epn);
+void usbhw_stall(int epn);
 
 //! Unstall endpoint
 /*! Unstall the given endpoint.  Does not apply to control endpoints; use 
 usbhw_ctl_stall() on those. */
-int usbhw_unstall(int epn);
+void usbhw_unstall(int epn);
 
 //! Endpoint stall status
 /*! Returns 1 if the endpoint is stalled, 0 if not. */
@@ -147,7 +151,7 @@ int usbhw_is_stalled(int epn);
 
 //! Control stall
 /*! Set the USB hardware for a control stall. */
-int usbhw_ctl_stall(void);
+void usbhw_ctl_stall(void);
 
 //! Control stall status
 /*! Returns 1 if the control endpoint is stalled, 0 if not. */
@@ -162,10 +166,10 @@ int usbhw_activate_ep(usb_endpoint_t *ep);
 //! Deactivate the given endpoint
 /*! Deactivates the hardware for the endpoint.
 */
-int usbhw_deactivate_ep(usb_endpoint_t *ep);
+void usbhw_deactivate_ep(usb_endpoint_t *ep);
 
 //! Set the node address in hardware
-int usbhw_set_address(u8 adr);
+void usbhw_set_address(u8 adr);
 
 void usbhw_int_en(void);
 void usbhw_int_en_sof(void);

@@ -1,6 +1,6 @@
 
 #include "usb.h"
-#include "usb_5509.h"
+#include "usbpriv.h"
 
 static volatile struct {
 	unsigned int suspended:1,
@@ -26,12 +26,11 @@ void usb_cancel(u8 epn)
 int usb_tx(u8 epn, usb_data_t *data, u32 len)
 {
 	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
-	usb_packet_req_t pkt;
 
 	if (!ep) return -1;
 	if (len&&!data) return -2;
 
-	if (ep->data->xferInProgress) return;
+	if (ep->data->xferInProgress) return -3;
 	ep->data->xferInProgress=1;
 	ep->data->buf=data;
 	ep->data->reqlen=len;
@@ -63,6 +62,7 @@ void usb_evt_txdone(usb_endpoint_t *ep)
 
 // ### FIXME: make receive work
 
+#if 0
 void usb_set_sof_cb(usb_cb_sof cb)
 {
 	if (!cb) {
@@ -84,6 +84,7 @@ void usb_set_presof_cb(usb_cb_sof cb)
 		USBIE|=USBIE_PSOF;
 	}
 }
+#endif
 
 void usb_set_address(u8 adr)
 {
@@ -108,18 +109,29 @@ int usb_stall(u8 epn)
 int usb_unstall(u8 epn)
 {
 	if (epn>31) return -1;
-	if (!(epn&15) return -1;
+	if (!(epn&15)) return -1;
 	usbhw_unstall(epn);
 	return 0;
 }
 
 int usb_is_stalled(u8 epn)
 {
-	u8 cnf;
-
 	if (epn>31) return -1;
 	if (!(epn&15)) return -1;
 	return usbhw_is_stalled(epn);
+}
+
+static int activate_endpoints(int config)
+{
+	int i;
+	usb_endpoint_t *ep;
+
+	for (i=1;i<32;++i) {
+		ep=usb_get_ep(config,i);
+		if (!ep) continue;
+		if (usbhw_activate_ep(ep))
+			return -1;
+	}
 }
 
 int usb_set_config(int cfn)
@@ -132,7 +144,7 @@ int usb_set_config(int cfn)
 	} else {
 		if (!usb_have_config(cfn)) return -1;
 		flags.config=cfn;
-		if (setupEndpointRegs(cfn)) return -1;
+		if (activate_endpoints(cfn)) return -1;
 		usb_set_state(USB_STATE_CONFIGURED);
 	}
 	return 0;
@@ -166,8 +178,8 @@ void usb_evt_reset(void)
 {
 	usb_set_state(USB_STATE_DEFAULT);
 	// sof & presof interrupts only set if we have callbacks
-	if (sofCB) USBIE|=USBIE_SOF;
-	if (preSOFCB) USBIE|=USBIE_PSOF;
+	//if (sofCB) USBIE|=USBIE_SOF;
+	//if (preSOFCB) USBIE|=USBIE_PSOF;
 
 	/* note: since we use FRSTE=1 we know the USB module is already (mostly) 
 	at power-up values, so we don't need to reset addresses etc etc */
@@ -190,6 +202,7 @@ void usb_set_state_cb(usb_cb_state cb)
 	stateChangeCallback=cb;
 }
 
+#if 0
 /* codes: -1: no such OUT ep */
 int usb_set_out_cb(int cfg, int epn, usb_cb_out cb)
 {
@@ -229,6 +242,7 @@ int usb_set_in_cb(int cfg, int epn, usb_cb_in cb)
 	}
 	return 0;
 }
+#endif
 
 void usb_set_txdone_cb(int epn, usb_cb_done cb)
 {
@@ -236,7 +250,7 @@ void usb_set_txdone_cb(int epn, usb_cb_done cb)
 
 	if (!ep) return;
 	if (epn<9) return;
-	ep->data->doneCallback=cb;
+	//ep->data->doneCallback=cb;
 }
 
 int usb_is_attached(void)
@@ -274,25 +288,25 @@ void usb_init(void *param)
 	flags.config=0;
 	flags.suspended=0;
 	flags.address=0;
-	ctlflags.state=USB_CTL_STATE_IDLE;
+	usb_ctl_init();
 	sofCB=preSOFCB=0;
 	stateChangeCallback=0;
 
 	// ### TODO: need to do this for all configurations
-	for (i=0;i<16;++i) {
+	for (i=0;i<31;++i) {
 		ep=usb_get_ep(1,i);
 		if (!ep) continue;
-		ep->data->go=0;
-		ep->data->reload=0;
+		//ep->data->go=0;
+		//ep->data->reload=0;
 		if (i>8) {
-			ep->data->cb.i=usb_bulk_in;
-			ep->data->bulkInProgress=0;
-			ep->data->stop=0;
+			//ep->data->cb.i=usb_bulk_in;
+			ep->data->xferInProgress=0;
+			//ep->data->stop=0;
 			ep->data->buf=0;
-			ep->data->buflen=0;
-			ep->data->count=0;
-			ep->data->doneCallback=0;
-			ep->data->lastlen=0;
+			//ep->data->buflen=0;
+			//ep->data->count=0;
+			//ep->data->doneCallback=0;
+			//ep->data->lastlen=0;
 		}
 	}
 	usbhw_init(param);

@@ -148,7 +148,7 @@ copied up.  PORUS is not waiting for you to do anything.
 //! USB data packet
 typedef usb_data_t *usb_buffer_t;
 
-extern usb_data_t *usb_ctl_write_data;
+extern usb_data_t usb_ctl_write_data[];
 
 //! USB setup packet
 /*! usb_setup_t holds all of the fields in a USB setup packet, 
@@ -365,5 +365,23 @@ The word format of a USB buffer is system dependent; the data type is
 usb_data_t.
 */
 /*!@}*/
+
+typedef struct usb_endpoint_data_t {
+	unsigned int xferInProgress:1;
+	usb_data_t *buf; // data ptr
+	// reqlen = length of buffer in bytes
+	// actlen = no. of bytes transmitted / received
+	u32 reqlen, actlen;
+	usb_cb_done done_cb;
+	void *hwdata; // used by the hardware layer for whatever
+} usb_endpoint_data_t;
+
+typedef struct usb_endpoint_t {
+	unsigned int id:5, // endpoint number, 0-31
+		type:2; // endpoint type
+	unsigned short packetSize; // in bytes
+	usb_endpoint_data_t *data;
+	int in_timeout; // in frames
+} usb_endpoint_t;
 
 #endif

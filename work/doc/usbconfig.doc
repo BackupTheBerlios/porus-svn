@@ -1,0 +1,91 @@
+
+/* :mode=c: */
+
+/*! \def USB_CTL_PACKET_SIZE
+\brief Size of a control data packet
+
+The maximum size, in bytes, of data packets in control transactions.
+*/
+
+/*! \def USB_CTL_WRITE_BUF_SIZE
+\brief Size of recieve buffer for control transactions
+
+The length in bytes of the statically declared receive array used to 
+receive data from control transactions.
+*/
+
+/*! \def usb_mem_len(l)
+\brief Convert bytes to native USB buffer lengths
+
+This macro converts a length in bytes to a length in either bytes, words, or longwords, depending on the unit used for the \c usb_data_t array.  Provided for portability; the common code of PORUS uses it frequently.
+
+\param l Length in bytes
+\return Length in native \c usb_data_t units
+*/
+
+/*! \fn void usb_get_device_desc(usb_data_t **bytes, int *len);
+\brief Get device descriptor
+
+Retrieves a pointer to the device descriptor, given as a \c usb_data_t array.  The length is placed in \p len .
+
+\param[out] bytes Pointer to a pointer, which is set to point to the descriptor.  Note that this may be located in ROM.
+\param[out] len Set to the descriptor's length.
+*/
+
+/*! \fn int usb_get_config_desc(unsigned int index, usb_data_t **bytes, int *len);
+\brief Get configuration descriptor
+
+Retrieves a pointer to the descriptor for the configuration numbered \p index.  Its length is placed in \p len .
+
+\param[in] index Configuration number to retrieve.
+\param[out] bytes Pointer to a pointer, which is set to point to the descriptor.  Note that this may be located in ROM.
+\param[out] len Set to the descriptor's length.
+\retval 0 No error
+\retval -1 No such configuration
+*/
+
+/*! \fn usb_endpoint_t *usb_get_ep(unsigned int config, unsigned int ep)
+\brief Get endpoint structure
+
+Returns the endpoint structure identified by \p config and \p ep, or 0 if none such exists.
+
+\param[in] config Number of the configuration containing the endpoint
+\param[in] ep Endpoint number
+\return Pointer to the endpoint structure, or 0 if none found
+*/
+
+/*! \fn int usb_have_config(unsigned int config)
+\brief See whether configuration exists
+
+Returns non-zero if the configuration numbered \p config exists, 0 otherwise.
+
+\param[in] config Configuration number
+\retval 0 Configuration does not exist
+\retval 1 Configuration exists
+*/
+
+/*! \fn int usb_config_features(unsigned int config)
+\brief Get configuration features
+
+Returns a bitmap describing certain features of the given configuration.  The bits are (currently):
+
+- Bit 0: 1 if self-powered, 0 if not
+- Bit 1: 1 if has remote wakeup, 0 if not
+
+Returns -1 if the configuration does not exist.
+
+\param[in] config Configuration number
+\return Features bitmap, or -1 if configuration does not exist
+*/
+
+/*! \fn void usb_set_serial_number(usb_data_t *bytes);
+\brief Set serial number
+
+Sets the device's serial number descriptor to the given USB string descriptor.
+
+The string descriptor format must be that given in the USB standard, section 9.6.7.  The format begins with a single byte giving the length of the descriptor in bytes, including the length byte.  Next is a byte giving the descriptor type, which in this case must be 3.  This is followed by the Unicode string giving the serial number.  Characters are 16-bit and must be given in little-endian byte order; i.e., the LSB must be in the upper position on 16-bit systems.
+
+The configuration file must contain a line setting the serial number; if it does not have one, this function is not generated and is not available.
+
+\param[in] bytes Serial number descriptor.
+*/

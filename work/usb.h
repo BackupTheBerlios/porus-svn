@@ -5,8 +5,10 @@
 // usbconfig.h is a generated file
 #include "usbconfig.h"
 
+extern usb_setup_t usb_setup;
+
 //! Initialisation function
-void usb_init(void);
+void usb_init(void *param);
 
 void usb_lock(void);
 void usb_unlock(void);
@@ -54,6 +56,7 @@ If this call is made on a nonexistent endpoint, nothing happens.
 \retval 0 No error
 \retval -1 Invalid endpoint
 \retval -2 Null data pointer
+\retval -3 Endpoint is busy
 */
 int usb_tx(u8 epn, usb_data_t *data, u32 len);
 
@@ -72,7 +75,7 @@ callback is called.
 
 This call cannot be used on the control endpoint.
 */
-int usb_bulk_rx(u8 epn, usb_data_t *data, u32 len);
+int usb_rx(u8 epn, usb_data_t *data, u32 len);
 
 //! Immediately stop the endpoint from sending data
 /*! Cancels a transaction in progress.
@@ -150,9 +153,45 @@ If this call is made for an invalid endpoint, nothing is done.
 \param timeout Timeout in milliseconds.
 */
 void usb_set_ep_timeout(int epn, u16 timeout);
-int usb_ctl_read_std(void);
+
+/*! \fn void usb_ctl(void)
+\brief Callback for control transactions
+
+PORUS calls this function when a new SETUP packet arrives.  
+At the time of the call, data for OUT transactions has been copied to 
+\c usb_ctl_write_data .
+
+This call is generally made at interrupt time.  You can either 
+handle the packet right away or defer the handling to a task.
+
+If a new SETUP arrives before the old one has ended, PORUS stalls it 
+and ignores calls to usb_ctl_write_end() or usb_ctl_read_end() .
+*/
+
+//! Check and handle standard control transactions
+/*! Checks the current \p usb_setup .  If it is a standard 
+transaction, this handles it and returns 1.  If it is not a 
+standard transaction, returns 0.
+
+Unless you mean to handle standard transactions yourself, you should 
+call this before processing a setup packet.
+*/
+int usb_ctl_std(void);
+
+//! Conclude a control read
+/*! Ends a control read, either with a stall or by returning data.
+
+If \p stat is 1, the control endpoint is stalled.  Otherwise, data is 
+returned using \p len and \p data .
+
+\param[in] stat Status.  0 means OK, 1 means stall.
+\param[in] len Length of returned data in bytes.  Ignored if 
+\p stall is 1.
+\param[in] data Pointer to data to transmit.  Ignored if 
+\p stall is 1.
+*/
 void usb_ctl_read_end(int stat, int len, usb_data_t *data);
-int usb_ctl_write_std(void);
+
 void usb_ctl_write_end(int stat);
 int usb_ctl_state(void);
 void usb_set_ctl_in_cb(usb_cb_ctl cb);

@@ -572,13 +572,13 @@ static const usb_endpoint_t %(name)s={
 def genEPConfigStructs(opts):
     cf=opts['config'][0]
     epStructs=[]
-    epArray=['0']*16
+    epArray=['0']*32
     for iface in cf['interface']:
 	for ep in iface['endpoint']:
 	    epStructs.append(genEPStruct(ep))
 	    epn=ep['number']
 	    if ep['dir']=='in':
-		epn+=8
+		epn+=16
 	    epArray[epn]='&'+ep['symbol']
     s='\n\n'.join(epStructs)
     s+='\n\n'+genPointerArray('endpoints',epArray,'static const usb_endpoint_t')
@@ -660,7 +660,7 @@ def printSource(opts):
     print
     print epConfigs
     print """
-usb_data usb_ctl_write_data[%(ctlWriteBufUnits)d];
+usb_data_t usb_ctl_write_data[%(ctlWriteBufUnits)d];
 
 static int get_len(usb_data_t *bytes)
 {"""%substs
