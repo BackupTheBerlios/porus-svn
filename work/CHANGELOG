@@ -1,0 +1,8 @@
+
+*** MPA -- 10 Oct 2004 5:43 PM
+
+- usbdescgen was generating a bad endpoints array.  This showed up for IN endpoints.  Fixed
+- (usbstdctl.c) Some of the standard control message handlers were misinterpreting the index field for IN endpoints.  Fixed
+- IN endpoints had screwed-up register setup routines.  Fixed
+- Check for transaction-in-progress during IN interrupt was broken.  Fixed
+- Now initialising configuration 1 endpoint data structures during usb_init()

@@ -1,0 +1,171 @@
+
+=========================
+PORUS: Portable USB Stack
+=========================
+
+by Michael Ashton, October 2004
+
+This stack is designed to contain, as far as possible, all of the code common to a complete USB device implementation.
+
+While this document retains the host-centric terms used by USB, it is written from the perspective of a USB device.  We refer to In and Out endpoints, where an In endpoint is a data source from the device, and an Out endpoint is a data sink on the device; but when we speak of "sending" data, we are speaking of sending data from the device to the host.  For example, we might speak of sending data out of an In endpoint.
+
+Programming model
+=================
+
+USB is an asymmetrical master-slave design, and this asymmetry is reflected in the design of this stack.  Reception and transmission operate differently.
+
+Most operations are done by means of callbacks, since USB is also (essentially) asynchronous.  See below for more information on callbacks and the task scheduling code which invokes them. 
+
+The control endpoint works differently from the other endpoints.  The handling of the control endpoint is described in detail further on.
+
+USB packet storage
+------------------
+
+Data packets are stored in an opaque data structure with two members: length and data.  Both values are retrieved and set through macros.
+
+This is necessary because some machines access data in words which are not eight bits wide.  On these machines, we pack multiple USB bytes into a single word.  Your code must account for this byte-packing in the data field, but the length field is handled through macros in the stack.
+
+See the reference manual for information about these macros.
+
+Data reception on general-purpose endpoints
+-------------------------------------------
+
+Data reception is reported through a callback, declared as follows::
+
+	usb_buffer_t *rxcallback(int ep, usb_buffer_t *buf)
+
+where `ep` is the endpoint number over which the packet arrived, and `buf` is either 0 or a pointer to a packet structure.
+
+If `buf` is a pointer, the stack has received a packet, the packet is available for your use, and `buf` points to it.  If `buf` is 0, the stack is requesting a new packet pointer from you.
+
+In either case, you may return either 0 or a pointer to a different packet structure.  If you return a pointer, and not 0, the pointer is used for the next reception.  If you return 0, the stack does nothing, but it will likely call you again when an OUT token arrives.
+
+When PORUS calls you with `buf` of 0, there are a few possible reasons:
+
+- A packet has been received, and is ready to be moved to a usb_packet_t struct, but the stack has none.  When you return a pointer in this case, the stack will immediately copy the new packet to it.
+
+- A packet was received, but there was no buffer for it; before it could be transferred to main memory, another OUT came in, with more data, but it had to be declined with a NAK handshake.  If you return a pointer here, it can be used when the next OUT arrives.
+
+- (Only in systems with DMA)  A packet has been received, and is being copied to main memory.  Meanwhile, the stack is trying to obtain a pointer for the next buffer.
+
+Data transmission on bulk endpoints
+-----------------------------------
+
+In USB, a device cannot send data asynchronously to the host.  It may only send data when the host specifically requests it, using an IN token.
+
+This does not mean that we use callbacks to request data.  Such callbacks would have to be made in anticipation of a future IN token.  We cannot, in general, make reasonable guesses about this, except in the case of isochronous IN endpoints, where IN tokens can reliably be anticipated.  We therefore provide functions for data transmission, which you may call at your leisure.  We use callbacks to notify you that a packet has been sent.
+
+The primary such function is the following::
+
+	int usb_tx(u8 ep, usb_buffer_t *data);
+
+where `ep` is the endpoint number, and `data` is the buffer to transmit.  When an IN token arrives, the data is supplied from `data`.  (The return value is an error code, with 0 indicating success; see the API reference for details.)
+
+The stack does not implement a full FIFO, but most USB peripherals maintain a ping-pong buffer for each endpoint.  Therefore, you can often supply the stack with another buffer before the first has been transmitted.  Until this happens, the stack needs access to your data, and you must not modify it until the stack is done with it.
+
+The stack can tell you that it is done with your buffer by means of a callback.  The callback is optional, and it looks like this::
+
+	usb_buffer_t *usb_cb_in(int ep, usb_buffer_t *data)
+
+where `ep` is the endpoint number, and `data` is either 0, or points to the buffer that has just been transmitted or processed, and is now available for reuse, or can be disposed of.
+
+You return either a new buffer pointer or 0.  Returning a pointer is exactly like calling `usb_tx` with that pointer, except that you get no error code; the stack will not call you unless it is ready for another packet.  You can continuously send data this way.
+
+If the host requests data, but has none, PORUS (or, to be accurate, the USB hardware) will return a NAK.  PORUS unfortunately cannot notify you of this, as most USB hardware NAKs packets silently.
+
+Data transmission on interrupt endpoints
+----------------------------------------
+
+Interrupt endpoints are similar to bulk endpoints, except that the host will request data at regular intervals.  The host polls for data on an interrupt endpoint by issuing an IN token.  If this is NAKed, the host assumes that no data is available at that time.  It tries again after a specified number of frames.  When you have data to provide, you can make it available for "pickup" by the host by calling usb_tx(), and PORUS will transmit it to the host at the next IN token.
+
+One major difference between interrupt endpoints and other kinds of endpoints is that it is a normal condition for data to be unavailable; indeed, host software is written with the expectation that data will be unavailable more often than not.
+
+There is no guarantee that the host will always issue IN tokens on a configured interrupt endpoint.  Most hosts will only do so when a process on them solicits interrupt data.  The host provides no direct indication that it is looking for interrupt data: it either sends INs, or it does not.
+
+This gives rise to the following problem.  Suppose you wish to report keypresses to the host through an interrupt endpoint.  When you detect a keypress, you use usb_tx() to make available a packet indicating which key is pressed.  If the host is actively sending IN tokens, it will receive the event in a timely manner.
+
+But if the host is not sending IN tokens, the packet will wait, possibly for a long time; it will not be picked up by the host.  If the host should resume sending IN tokens at some later time, it will immediately receive that keypress -- perhaps minutes after it occurred.
+
+To prevent this from happening, PORUS tracks the time that packets have been waiting.  You can tell PORUS to "give up" on sending a packet after a certain number of USB frames have gone by without its being sent.  This timeout is set in the configuration file.  You can also tell PORUS to never give up on a packet, should you want that behaviour.
+
+You can always cancel an unsent packet using usb_buf_cancel().  PORUS will then forget about the packet and will not send it.
+
+You can tell whether a packet has been sent or is waiting to be sent by calling usb_buf_sent().
+
+There is unfortunately no way to detect whether the host has requested data and been rejected.  Most USB hardware silently NAKs IN tokens for which no data is available, and the occurrance of this cannot be detected.  Therefore, when you have interrupt data to send, it is correct to send the data, even if the host is not requesting it.  PORUS will discard the packet if necessary.
+
+Since interrupt requests may take a relatively long time to come round, you may want to update or modify a sent packet before it has been transmitted.  You can do this as long as you lock the packet before modifying it.  Locking the packet prevents PORUS from reading it at interrupt time.  To lock a packet, use usb_buf_lock(); to unlock a packet, use usb_buf_unlock().  Do not lock a packet for too long: locking a packet disables certain interrupts, and this could cause problems (although it will never corrupt PORUS' operation).
+
+Data transmission on isochronous endpoints
+------------------------------------------
+
+Isochronous IN endpoints expect data to be transmitted with every frame.  This requires you, and the stack, to be prepared with data to transmit every time a frame occurs; a missing packet is an anomalous condition.
+
+The way to handle this is to return a pointer at every transmit callback.  However, it should be noted that this callback does not occur at the same time on every system.
+
+Some USB peripherals have a timer which can be set to go off at a certain time before the next frame arrives.  When this happens, new data can be collected for an isochronous endpoint.  On machines with this facility, the stack can call you when this timer goes off.  See the API reference for details.
+
+On systems lacking such a timer, PORUS requests new data as soon as a packet has been copied into the transmit holding area.  This is because PORUS cannot estimate when the next frame will occur, so it attempts to collect data as early and as often as possible.  This works, but has the disadvantage of higher latency.  In the former case, latency is minimized.
+
+It is prudent to "prime the pump" on an isochronous IN endpoint by providing it with data, using usb_tx(), just after the endpoint is configured.
+
+Control endpoints
+-----------------
+
+A USB control endpoint does not operate fundamentally differently from "normal" endpoints, but it does use a token used by no other endpoint: the SETUP token.  The control endpoint uses a certain protocol based on this token, and since this protocol must be supported by every USB device, we have included support for it directly in the stack.
+
+In particular, all standard control requests are handled by the stack itself.  Configuration information -- including arrays, string constants, etc. -- are generated from a configuration file by an included Python program.  The resulting C code is compiled with the rest of the stack.
+
+Class and vendor requests cannot in general be handled this way; class modules may be included in future versions, but vendor modules cannot, for obvious reasons.  The two cases work exactly the same way and have congruent function sets and callbacks.  We will use vendor requests as an example, since it is not possible to build in high-level support for these.
+
+When a SETUP packet arrives, the stack calls the following callback::
+
+	int ctlcallback(usb_setup_t *setup);
+
+where `setup` is a structure containing the data in the SETUP packet, and the first data packet, if any.  You are expected to return 0, for success, or a negative error code.  Legal error codes are listed in the API reference.
+
+All of the pertinent parameters are included in `setup`, so let us examine the `usb_setup_t` structure, which is not opaque::
+
+	typedef struct {
+		unsigned int dataDir:1, // 1 = device to host
+			type:2,
+			recipient:5;
+		u8 request;
+		u16 value;
+		u16 index;
+		u16 len;
+		u16 dataseq; // 0 for first data packet, 1 for next, etc.
+		u16 datalen;
+		usb_data_t *data;
+	} usb_setup_t;
+
+Most of the members correspond directly to fields in the USB SETUP packet.  `dataDir`, `type`, and `recipient` are copied from the first byte in the SETUP packet (`bmRequestType`).  `request`, `value`, `index`, and `len` are copied from the corresponding words in the SETUP packet; although the names are slightly different, the correspondence should be plain.  We refer those unfamiliar with the SETUP packet to chapter 9 of the USB 2.0 specification.
+
+`dataseq`, `datalen` and `data` do not appear in the SETUP packet.  `dataseq` is used in SETUP transactions with multiple data packets; the handling of these is described later on.  `datalen` is the actual length of the data pointed to by `data`.
+
+Some SETUP transactions have accompanying data; others have none, or require data to be returned.  The control callback suffices for each situation.
+
+SETUP packets with no additional data and no data requested are reported with both `datalen` and `data` set to 0.  You need only return a code indicating acceptance or error.
+
+SETUP packets with data to send, in which the data fits in a single DATA packet, are reported with `datalen` set to the length of data in the buffer, and with `data` pointing to the data.  Again, you need only return a code indicating acceptance or error.  `len` will be equal to `datalen`, and `dataseq` will be 0.
+
+SETUP packets with data to send, in which the data does not fit in a single DATA packet, are reported with `datalen` set to the length of data in `data`, and with `data` pointing to the first chunk of data.  `len` is greater than `data` in this case.  When you return a success code, the stack will call you again with the same setup packet, but with `data` set to a new buffer containing the next chunk of data, and with `dataseq` incremented by one.  This continues until the last packet arrives.  With the last packet, `datalen` is less than `len`.
+
+SETUP packets requesting data to be returned are reported with `data` set to 0.  `len` indicates the amount of requested data; you are expected to set `data` to a buffer containing the data, and to set `datalen` to the amount of data in it.  *Do not use a buffer you have allocated on the stack*, because it must be available after you return.
+
+You should return as much data as you can, observing the maximum packet length; do not overrun the `data` buffer.  If you do not have enough space to copy all of the requested data, return with `datalen` set to maximum.  You will be called again with a new buffer to use, and with `dataseq` incremented by one.  Continue this until you have returned all of the data.  You can always return a short packet, hence ending the transaction early, by returning with `datalen` set to zero.
+
+Using the stack
+===============
+
+You must first construct a configuration file.  You then feed the configuration file into usbdescgen, which generates code for various things needed by PORUS.  The prime benefit of it is that it generates the USB descriptor packets for you.  This is required for enumeration.
+
+To write your configuration file, start with template.usbdesc.  This file is extensively commented; by reading and editing it you can easily construct your own configuration.
+
+In your own code, do the following at initialisation time:
+
+- Call usb_init() first.  This sets up PORUS' data structures and, depending on the system, performs hardware initialisation.
+
+- Set up the callbacks for your OUT endpoints by calling usb_set_out_cb() for each OUT endpoint you have.  You can also set up callbacks for your IN endpoints and bus events, if you have any.
+
+- Call usb_attach().  This causes the hardware to physically attach to the bus.  If your device is connected to an active host, enumeration will begin soon afterwards.  This process is transparent, except that you will receive bus events if you have signed up for any.
