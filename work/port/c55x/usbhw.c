@@ -3,6 +3,8 @@
 #include <bios.h>
 #include <c55.h>
 #include <usb_5509.h>
+#include <mem.h>
+#include <ads1271evm_mmb0cfg.h>
 
 #define pkt_from_pkt(P) ((usb_packet_req_t *)((P)->ep->data->hwdata))
 
@@ -190,12 +192,13 @@ static void epReload(int epn, usb_endpoint_t *ep, usb_data_t *data, u16 len)
 // ### FIXME: make isrOUT work again
 static void isrOUT(int epn)
 {
-	usb_endpoint_t *ep=usb_get_ep(usb_get_config(),epn);
+	usb_endpoint_t *ep;
 	usb_buffer_t buf;
 	u16 dctl;
 	
+	ep=usb_get_ep(usb_get_config(),epn);
 	if (!ep) return;
-
+	if (epn>15) epn-=8;
 	dctl=USBODCTL(epn);
 	if (!(dctl&USBODCTL_GO)) {
 		// no transfers, so start one
@@ -210,6 +213,7 @@ void usbhw_cancel(usb_endpoint_t *ep)
 {
 	int epn=ep->id;
 
+	if (epn>15) epn-=8;
 	((usb_packet_req_t *)(ep->data->hwdata))->done=1;
 	if (USBIDCTL(epn)&USBIDCTL_GO) {
 		USBIDCTL(epn)|=USBIDCTL_STP;
@@ -219,49 +223,22 @@ void usbhw_cancel(usb_endpoint_t *ep)
 	USBICTY(epn)|=USBICTY_NAK;
 }
 
-#if 0
-static void nextDMAIN(u8 epn, usb_endpoint_t *ep, int rld)
-{
-	u32 data;
-	u16 len;
-
-	if (!ep->data->cb.i) return;
-	len=ep->packetSize;
-	if (ep->data->cb.i(epn,&data,&len)) {
-		ep->data->buf=0;
-		ep->data->bulkInProgress=0;
-		if (ep->data->doneCallback)
-			ep->data->doneCallback(epn);
-		if (ep->data->lastlen>=ep->packetSize) {
-			data=0;
-			len=0;
-		} else
-			return;
-	} else
-		ep->data->bulkInProgress=1;
-	ep->data->lastlen=len;
-	/*
-	if (rld)
-		epReload(epn,ep,data,len);
-	else
-		epGo(epn,ep,data,len);
-	*/
-	epGo(epn,ep,data,len);
-}
-
 static void isrDMAIN(u8 epn, int rld)
 {
-	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
+	usb_endpoint_t *ep;
+	usb_packet_req_t *txpkt;
 
+	ep=usb_get_ep(usb_get_config(),epn);
 	if (!ep) return;
-
-	if (!ep->data->stop)
-		nextDMAIN(epn,ep,0);
+	txpkt=(usb_packet_req_t *)(ep->data->hwdata);
+	txpkt->done=1;
+	txpkt->actlen=txpkt->reqlen;
+	usb_evt_txdone(ep,txpkt->actlen);
 }
-#endif
 
 static void dmaGo(int epn, u32 data, u16 len)
 {
+	if (epn>15) epn-=8;
 	//usb_dma_set_ptr(epn,data);
 	USBODADL(epn)=data&0xffff;
 	USBODADH(epn)=(data>>16)&0xff;
@@ -294,7 +271,7 @@ static void isrIN(int epn)
 	txpkt=(usb_packet_req_t *)(ep->data->hwdata);
 	txpkt->done=1;
 	txpkt->actlen=txpkt->reqlen;
-	usb_evt_txdone(ep);
+	usb_evt_txdone(ep,txpkt->actlen);
 }
 
 void usbhw_isr(void)
@@ -338,32 +315,33 @@ void usbhw_isr(void)
 			//usb_unlock();
 			return;
 		}
+#if 0
 	} else if (src<0x2E) { // endpoint interrupt
 		if (src&1) { // spurious
 			//usb_unlock();
 			return;
 		}
 		src=(src-0x10)>>1; // src is now the endpoint number
-		if (src&8) isrIN(src);
+		if (src&8) isrIN(src+8);
 		//else isrOUT(src);
-#if 0
-	} else if (src<0x4f) { // dma
-		if (src<0x32) {
+#else
+	} else if (src>=0x32&&src<0x4f) { // dma
+		//if (src<0x32) {
 			//usb_unlock();
-			return; // spurious
-		}
+		//	return; // spurious
+		//}
 		src-=0x30;
 		if (src&1) { // go
 			src>>=1;
 			// FIXME: make OUT DMA work again
 			if (src<8) { ; //isrDMAOUT(src,0);
 			}
-			else isrDMAIN(src,0);
+			else isrDMAIN(src+8,0);
 		} else { // reload
 			src>>=1;
 			if (src<8) { ; //isrDMAOUT(src,1);
 			}
-			else isrDMAIN(src,1);
+			else isrDMAIN(src+8,1);
 		}
 #endif
 	}
@@ -372,18 +350,21 @@ void usbhw_isr(void)
 
 void usbhw_stall(int epn)
 {
+	if (epn>15) epn-=8;
 	if (!(USBICNF(epn)&USBICNF_ISO))
 		USBICNF(epn)|=USBICNF_STALL;
 }
 
 void usbhw_unstall(int epn)
 {
+	if (epn>15) epn-=8;
 	if (!(USBICNF(epn)&USBICNF_ISO))
 		USBICNF(epn)&=~USBICNF_STALL;
 }
 
 int usbhw_is_stalled(int epn)
 {
+	if (epn>15) epn-=8;
 	if (USBICNF(epn)&USBICNF_ISO)
 		return 0;
 	else
@@ -417,18 +398,18 @@ void usbhw_set_address(u8 adr)
 // be the same size and starts after the X buffer.
 static u16 usbhw_get_ep_buf_ofs(u8 epn)
 {
-	if (epn>=8)
-		return (((u16)(USBOBAX(epn))<<4)-0x80);
+	if (epn>=16)
+		return (((u16)(USBIBAX(epn-8))<<4)-0x80);
 	else
-		return (((u16)(USBIBAX(epn))<<4)-0x80);
+		return (((u16)(USBOBAX(epn))<<4)-0x80);
 }
 
 static void usbhw_set_ep_buf_ofs(u8 epn, u16 ofs)
 {
-	if (epn>=8)
-		USBOBAX(epn)=(u8)((ofs-0x80)>>4);
+	if (epn>=16)
+		USBIBAX(epn-8)=(u8)((ofs-0x80)>>4);
 	else
-		USBIBAX(epn)=(u8)((ofs-0x80)>>4);
+		USBOBAX(epn)=(u8)((ofs-0x80)>>4);
 }
 
 // returns -1 if it runs out of space
@@ -459,13 +440,16 @@ static int usbhw_alloc_ep_buf(int config, usb_endpoint_t *ep)
 	return 0;
 }
 
+extern Int auxheap;
+
 int usbhw_activate_ep(usb_endpoint_t *ep)
 {
 	int epn=ep->id;
 	u8 cnf=0;
 	usb_packet_req_t *pkt;
 
-	pkt=(usb_packet_req_t *)malloc(sizeof(usb_packet_req_t));
+	if (epn>15) epn-=8;
+	pkt=(usb_packet_req_t *)MEM_alloc(auxheap,sizeof(usb_packet_req_t),0);
 	if (!pkt) {
 		USBICNF(epn)=0;
 		return -1;
@@ -493,8 +477,13 @@ int usbhw_activate_ep(usb_endpoint_t *ep)
 	USBICTX(epn)=0;
 	USBICTY(epn)=0;
 	USBICNF(epn)|=USBICNF_UBME;
-	USBIEPIE|=1<<epn;
-	USBIDIE|=1<<epn;
+	if (epn>7) {
+		//USBIEPIE|=1<<(epn-16);
+		USBIDIE|=1<<(epn-8);
+	} else {
+		//USBOEPIE|=1<<epn;
+		USBODIE|=1<<epn;
+	}
 	return 0;
 }
 

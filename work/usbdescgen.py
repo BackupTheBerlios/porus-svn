@@ -499,10 +499,15 @@ def printHeader(config):
 	sn=True
     else:
 	sn=False
+    if usb_data_t=='unsigned short':
+	usbMemLen='((l)>>1)'
+    else:
+	usbMemLen='(l)'
     substs={'version':VERSION,'date':datetime.datetime.now().ctime(),
     	'usb_data_t':usb_data_t, 'configFile':config['configFile'],
 	'maxCtlPacketSize':config['maxCtlPacketSize'],
 	'ctlWriteBufLen':config['ctlWriteBufLen'],
+	'usbMemLen':usbMemLen,
 	'bufLenSize':1} ### FIXME: This needs to be configurable per target
     print """
 #ifndef GUARD_USB_DESC_GENERATED_H
@@ -525,7 +530,7 @@ typedef %(usb_data_t)s usb_data_t;
 #define USB_BUF_LEN_SIZE %(bufLenSize)d
 #define USB_CTL_PACKET_SIZE %(maxCtlPacketSize)d
 #define USB_CTL_WRITE_BUF_SIZE %(ctlWriteBufLen)d
-#define usb_mem_len(l) (((l)+((l)&1))/(sizeof(usb_data_t)))
+#define usb_mem_len(l) %(usbMemLen)s
 #define usb_buf_len(buf) (buf[0])
 #define usb_buf_set_len(buf,len) buf[0]=len
 #define usb_buf_data(buf) (buf+1)
@@ -555,6 +560,8 @@ def genEPStruct(opts):
 	typ=ENDPOINT_TYPES[opts['type']]
     epname=opts['symbol']
     datastruct=epname+'_data';
+    if opts['dir']=='in':
+	number+=16
     substs={'name':epname,'epid':number,'eptype':typ,
     	'pktsize':opts['maxPacketSize'],
 	'datastruct':datastruct,
@@ -690,7 +697,7 @@ int usb_get_config_desc(unsigned int index, usb_data_t **bytes, int *len)
 usb_endpoint_t *usb_get_ep(unsigned int config, unsigned int ep)
 {
 	if (!usb_have_config(config)) return 0;
-	if (ep>15) return 0;
+	if (ep>31) return 0;
 	return (usb_endpoint_t *)(endpoints[ep]);
 }
 

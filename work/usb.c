@@ -33,28 +33,35 @@ int usb_tx(u8 epn, usb_data_t *data, u32 len)
 	ep->data->reqlen=len;
 	ep->data->actlen=0;
 	usbhw_int_dis_txdone(epn);
-	usb_evt_txdone(ep);
+	usb_evt_txdone(ep,0);
 	usbhw_int_en_txdone(epn);
 	return 0;
 }
 
-void usb_evt_txdone(usb_endpoint_t *ep)
+void usb_evt_txdone(usb_endpoint_t *ep, u16 actlen)
 {
 	usb_packet_req_t pkt;
 	u32 l;
 
 	if (!ep->data->xferInProgress) return;
+	ep->data->actlen+=actlen;
 	if (ep->data->actlen>=ep->data->reqlen) {
 		ep->data->xferInProgress=0;
-		return;
+		if (actlen<64) {
+			return;
+		} else {
+			l=pkt.reqlen=0;
+		}
+	} else {
+		l=ep->data->reqlen-ep->data->actlen;
+		if (l>ep->packetSize)
+			l=ep->packetSize;
+		pkt.reqlen=l;
+		pkt.data=ep->data->buf+usb_mem_len(ep->data->actlen);
 	}
 	pkt.ep=ep;
-	l=ep->data->reqlen-ep->data->actlen;
-	if (l>ep->packetSize)
-		l=ep->packetSize;
-	pkt.data=ep->data->buf+usb_mem_len(l);
 	usbhw_tx(&pkt);
-	ep->data->actlen+=l;
+	//ep->data->actlen+=l;
 }
 
 // ### FIXME: make receive work
@@ -197,6 +204,7 @@ void usb_evt_reset(void)
 {
 	deactivate_endpoints();
 
+	flags.suspended=0;
 	usb_set_state(USB_STATE_DEFAULT);
 	usbhw_reset();
 	// sof & presof interrupts only set if we have callbacks

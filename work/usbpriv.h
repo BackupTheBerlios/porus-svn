@@ -14,7 +14,7 @@ typedef struct usb_packet_req_t {
 } usb_packet_req_t;
 
 //! Called when data copy is done
-void usb_evt_txdone(usb_endpoint_t *ep);
+void usb_evt_txdone(usb_endpoint_t *ep, u16 actlen);
 //! Called when OUT is done
 void usb_evt_rxdone(usb_endpoint_t *ep);
 //! Called if IN is not received in time

@@ -297,8 +297,7 @@ void usb_evt_ctl_rx(void)
 	}
 	l=usb_setup.len-ctlflags.ct;
 	if (l>USB_CTL_PACKET_SIZE) l=USB_CTL_PACKET_SIZE;
-	ctlflags.ct+=l;
-	last=(ctlflags.ct>=usb_setup.len);
+	last=(ctlflags.ct+l)>=usb_setup.len;
 	if (usbhw_get_ctl_write_data(&l,usb_ctl_write_data+usb_mem_len(ctlflags.ct),last)) {
 		usb_ctl_stall();
 		return;

@@ -110,13 +110,20 @@ control endpoint hardware to the given buffer.
 
 At entry, \p len must point to the number of bytes that \p d can hold.  
 If the amount of received data is greater than \p len, -1 is returned.
-Otherwise, at exit, the 
-number of bytes actually copied is put in \p len.
+Otherwise, at exit, the number of bytes actually copied is put in \p len.
 
-This is usually called in response to usb_evt_ctl_rx().
+\p last is a flag used to tell the hardware whether this is the last 
+data packet expected.  If \p last is 1, the hardware will expect a status 
+handshake; if \p last is 0, the hardware will expect more data.  Some 
+hardware will stall automatically if an IN is received when an OUT is 
+expected.
 
-This blocks until the copy is complete.
+This function is called in response to usb_evt_ctl_rx(), so is done under 
+interrupt. It blocks until the copy is complete.
 
+\param len Pointer to length parameter
+\param d Pointer to buffer
+\param last End flag
 \retval -1 More data received than expected
 */
 int usbhw_get_ctl_write_data(u8 *len, usb_data_t *d, int last);
