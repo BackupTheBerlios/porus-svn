@@ -5,6 +5,7 @@
 #include <usb_5509.h>
 #include <mem.h>
 #include <ads1271evm_mmb0cfg.h>
+#include <gbl.h>
 
 #define pkt_from_pkt(P) ((usb_packet_req_t *)((P)->ep->data->hwdata))
 
@@ -494,10 +495,10 @@ void usbhw_deactivate_ep(usb_endpoint_t *ep)
 }
 
 //### TODO: support APLL on 5507 / 5509A
-static void usbhw_init_pll(unsigned int fin)
+static void usbhw_init_pll(void)
 {
-	int mult=48/fin;
-	
+	int mult=48/(GBL_getClkIn()/1000);
+
 	if (mult>31) mult=31;
 	USBPLL=0x2012|(mult<<7); //### FIXME: can't do fractional mults ..
 	while (!(USBPLL&1)); // wait for lock
@@ -538,6 +539,6 @@ void usbhw_detach(void)
 
 int usbhw_init(void *param)
 {
-	usbhw_init_pll(*(unsigned int *)(param));
+	usbhw_init_pll();
 	return 0;
 }
