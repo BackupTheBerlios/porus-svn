@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-VERSION='0.3.0'
+VERSION='0.4.0'
 
 import datetime,textwrap,logging,pprint
 
@@ -8,7 +8,7 @@ debug=logging.debug
 warn=logging.warning
 error=logging.error
 
-logging.getLogger().setLevel(logging.DEBUG)
+#logging.getLogger().setLevel(logging.DEBUG)
 
 DESCTYPE_DEVICE=1
 DESCTYPE_CONFIGURATION=2
@@ -25,10 +25,12 @@ VALID_NONISO_PACKET_SIZES=[8,16,32,64]
 ENDPOINT_TYPES={
 	'bulk':'USB_EPTYPE_BULK',
 	'interrupt':'USB_EPTYPE_INTERRUPT',
-	'isochronous':'USB_EPTYPE_ISOCHRONOUS'}
+	'isochronous':'USB_EPTYPE_ISOCHRONOUS'
+}
 
 default_device={
 	'dataFormat':'u8',
+	'ctlWriteBufLen':32,
 	'usbRelease':'2.0',
 	'classCode':0,
 	'subclassCode':0,
@@ -160,7 +162,7 @@ def setDefaults(d,defs):
     d2.update(d)
     d=d2
     for key,val in d.items():
-	print ("let's look at key [%s]"%str(key))
+	debug("let's look at key [%s]"%str(key))
 	if val is None:
 	    error("Option %s not provided, and it has no default"%key)
 	if isinstance(val,dict) or isinstance(val,tuple):
@@ -360,9 +362,9 @@ def genConfigArray(o):
 	if mp==0:
 	    warn('config %d: maxPower is zero, but device is self-powered'%o['value'])
 	a+=[o['maxPower']//2]
-    else:
+    if not selfPowered:
 	if o.has_key('maxPower'):
-	    warn("config %d: device is self-powered; maxPower option ignored"%o['value'])
+	    warn("config %d: device is not self-powered; maxPower option ignored"%o['value'])
 	a+=[0]
     for iface in o['interface']:
 	a+=iface['descriptor']
@@ -500,6 +502,7 @@ def printHeader(config):
     substs={'version':VERSION,'date':datetime.datetime.now().ctime(),
     	'usb_data_t':usb_data_t, 'configFile':config['configFile'],
 	'maxCtlPacketSize':config['maxCtlPacketSize'],
+	'ctlWriteBufLen':config['ctlWriteBufLen'],
 	'bufLenSize':1} ### FIXME: This needs to be configurable per target
     print """
 #ifndef GUARD_USB_DESC_GENERATED_H
@@ -521,6 +524,7 @@ typedef %(usb_data_t)s usb_data_t;
 
 #define USB_BUF_LEN_SIZE %(bufLenSize)d
 #define USB_CTL_PACKET_SIZE %(maxCtlPacketSize)d
+#define USB_CTL_WRITE_BUF_SIZE %(ctlWriteBufLen)d
 #define usb_mem_len(l) (((l)+((l)&1))/(sizeof(usb_data_t)))
 #define usb_buf_len(buf) (buf[0])
 #define usb_buf_set_len(buf,len) buf[0]=len
@@ -608,8 +612,10 @@ def printSource(opts):
     epConfigs=genEPConfigStructs(opts)
     if dataFormat=='u16':
 	dataOffset=1
+	ucw=u16len(opts['ctlWriteBufLen'])
     else:
 	dataOffset=2
+	ucw=opts['ctlWriteBufLen']
     substs={'version':VERSION,'date':datetime.datetime.now().ctime(),
     	'configDescCount':configDescCount,
 	'stringDescCount':stringDescCount,
@@ -617,7 +623,8 @@ def printSource(opts):
 	'langid':'%04.4x'%LANGID_EN_US,
 	'usb_data_t':usb_data_t,
 	'headerName':opts['headerName'],
-	'configFile':opts['configFile']}
+	'configFile':opts['configFile'],
+	'ctlWriteBufUnits':ucw}
     if serialNumberIndex!=-1:
 	substs['serialNumberIndex']=serialNumberIndex
     print """
@@ -653,8 +660,10 @@ def printSource(opts):
     print
     print epConfigs
     print """
+usb_data usb_ctl_write_data[%(ctlWriteBufUnits)d];
+
 static int get_len(usb_data_t *bytes)
-{"""
+{"""%substs
     if dataFormat=="u16":
 	print """\treturn (int)(*bytes);"""
     else:

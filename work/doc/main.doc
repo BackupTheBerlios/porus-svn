@@ -1,0 +1,58 @@
+
+/*! \page conv1 Conventions
+This page gives various conventions used throughout PORUS.
+
+\section APIs
+
+PORUS has two APIs: the public API, and the hardware API.  If you are only using PORUS, and not porting it, you should only use the public API.
+
+If you are writing a port, you will need the hardware API, and you must supply all of the functions whose names begin with \c usbhw_ .
+
+\section Data types
+
+PORUS uses a number of custom data types.  Definitions are given in \c types.h file.  A default \c types.h is given in the top level, and machine-specific versions, if needed, are kept in the \c port subdirectory (see below).  You can compile with the one included with PORUS, or use your own, but since the headers include it, it must be available.  The default \c types.h should nearly always suffice.
+
+- \c u8 Unsigned 8-bit.  Usually \c unsigned \c char .
+- \c s8 Signed 8-bit.  Usually \c char .
+- \c u16 Unsigned 16-bit.  Usually \c unsigned \c short .
+- \c s16 Signed 16-bit.  Usually \c short .
+- \c u32 Unsigned 32-bit.  Usually \c unsigned \c long .
+- \c s32 Signed 32-bit.  Usually \c signed \c long .
+- \c u64 Unsigned 64-bit.  Usually \c unsigned \c long \c long .
+- \c s64 Signed 64-bit.  Usually \c signed \c long \c long .
+- \c f32 IEEE-754 floating point, 32 bits.  Usually \c float .
+- \c f64 IEEE-754 floating point, 64 bits.  Usually \c double .
+
+The latter two aren't much used.
+
+When width isn't terribly important, usually PORUS code uses \c int for integers and \c float for floating-point.
+
+Boolean values are passed as \c int and use the usual C convention that 0 is false and non-zero is true.
+
+\section Source files
+
+The main header file is \c usb.h .  This file contains the public API.  \c usb.h includes the generated file \c usbconfig.h .  This file contains structures and functions which can change depending on the configuration.  \c usbconfig.h in turn includes \c usbtypes.h .  This contains definitions needed by \c usbconfig.h .  \c usbhw.h gives the hardware-specific function prototypes.  \c port.h contains various defines and switches describing the capabilities of the port.
+
+The source files are split into a few more files.  \c usb.c contains the core logic of PORUS.  \c usbctl.c contains enumeration and control endpoint functions.  \c usbconfig.c is generated and contains enumeration constants and some code.
+
+Hardware-specific code is kept in the \c port directory tree.  \c port contains a number of directories, named after the port whose files they contain.  In the port directories is at least one file, \c usbhw.c , which contains the hardware-specific code for that port.  There may be other files; hopefully there is at least documentation for the port!
+
+\section Function and variable names
+
+All PORUS function names begin with either \c usb_ or \c usbhw_ .  \c usb_ 
+is used for functions in the public API.  \c usbhw_ is used for functions in the hardware API.  The functions related only to control endpoints are prefixed \c usb_ctl_ .
+
+PORUS uses a few (gasp!) global variables.  The naming for these is the same as the naming of functions.
+
+PORUS has a lot of accessor functions.  Setter functions are prefixed \c usb_set_ , \c usb_ctl_set_ , or \c usbhw_set_ .  Boolean getter functions are sometimes named with \c _is_ ; getters which report a parameter use \c _get_ .
+
+\section Endpoint numbers
+
+USB provides for eight IN endpoints, numbered 0-7, and eight OUT endpoints, also numbered 0-7.  Many PORUS functions operate on either IN or OUT endpoints, so PORUS endpoint numbering is a little different:
+
+- Endpoints IN0-7 are numbered 0-7.
+- Endpoints OUT0-7 are numbered 8-15.
+
+Another way to look at it: OUT endpoint numbers are like IN endpoint numbers, but with bit 3 set.
+
+*/

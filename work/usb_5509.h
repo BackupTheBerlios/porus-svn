@@ -7,7 +7,7 @@
 #define USB_BASE 		0x5800
 
 #define IOTYPE 		ioport unsigned short *
-#define IOREG(a)		*(IOTYPE)(a)
+#define IOREG(a)		(*(IOTYPE)(a))
 #define USBREG(ofs)		IOREG(USB_BASE+ofs)
 
 #define USBPLL			IOREG(0x1E00)
@@ -17,21 +17,8 @@
 #define USBIDLECTL_IDLESTAT	(1<<1)
 #define USBIDLECTL_IDLEEN	(1<<0)
 
+/* Endpoint numbers (for 'ep'): IN is 1-7, OUT is 9-15 */
 #define USBDMA(ep,reg)	USBREG(((ep)*8+(reg)))
-#define usb_dma_set_ptr(ep,adr) \
-	USBDMA(ep,USBODADH)=(adr>>16)&0xff; USBDMA(ep,USBODADL)=(adr)&0xffff;
-#define usb_dma_ptr(ep) \
-	((u32)(USBDMA(ep,USBODADH))<<16|USBDMA(ep,USBODADL))
-#if 0
-#define usb_dma_ptr(ep) \
-	(void *)(((long)(USBDMA(ep,USBODADH))<<15|USBDMA(ep,USBODADL))>>1)
-#define usb_dma_set_ptr(ep,adr) \
-	USBDMA(ep,USBODADH)=(((unsigned long)(adr))>>15)&0xff; USBDMA(ep,USBODADL)=(((unsigned long)(adr))<<1)&0xffff;
-#endif
-#define usb_dma_rld_ptr(ep) \
-	(void *)((USBDMA(ep,USBODRAH)<<8|USBDMA(ep,USBODRAL))>>1)
-#define usb_dma_set_rld_ptr(ep,adr) \
-	USBDMA(ep,USBODRAH)=((unsigned long)(adr))>>15; USBDMA(ep,USBODRAL)=((unsigned long)(adr))<<1
 #define USBBUF(reg)		USBREG((0x80+(reg)))
 #define USBBUFOUT0(reg)	USBREG((0xE80+(reg)))
 #define USBBUFIN0(reg)	USBREG((0xEC0+(reg)))
@@ -107,7 +94,8 @@
 /* reg field offsets */
 
 // for USBDMA
-#define USBIDCTL		0
+//#define USBIDCTL		0
+#define USBIDCTL(ep)		USBDMA(ep,0)
 #define USBIDCTL_PM		(1<<8)
 #define USBIDCTL_EM		(1<<7)
 #define USBIDCTL_SHT		(1<<6)
@@ -118,15 +106,15 @@
 #define USBIDCTL_STP		(1<<1)
 #define USBIDCTL_GO		(1<<0)
 
-#define USBIDSIZ		1
-#define USBIDADL		2
-#define USBIDADH		3
-#define USBIDCT		4
-#define USBIDRSZ		5
-#define USBIDRAL		6
-#define USBIDRAH		7
+#define USBIDSIZ(ep)		USBDMA(ep,1)
+#define USBIDADL(ep)		USBDMA(ep,2)
+#define USBIDADH(ep)		USBDMA(ep,3)
+#define USBIDCT(ep)		USBDMA(ep,4)
+#define USBIDRSZ(ep)		USBDMA(ep,5)
+#define USBIDRAL(ep)		USBDMA(ep,6)
+#define USBIDRAH(ep)		USBDMA(ep,7)
 
-#define USBODCTL		0
+#define USBODCTL		USBDMA(ep,0)
 #define USBODCTL_PM		(1<<8)
 #define USBODCTL_EM		(1<<7)
 #define USBODCTL_SHT		(1<<6)
@@ -137,7 +125,7 @@
 #define USBODCTL_STP		(1<<1)
 #define USBODCTL_GO		(1<<0)
 
-#define USBODSIZ		1
+#define USBODSIZ		USBDMA(ep,1)
 #define USBODADL		2
 #define USBODADH		3
 #define USBODCT		4
@@ -146,44 +134,44 @@
 #define USBODRAH		7
 
 // for USBEPDEF
-#define USBICNF 		0
+#define USBICNF(ep)		USBEPDEF(ep,0)
 #define USBICNF_UBME		(1<<7)
 #define USBICNF_ISO		(1<<6)
 #define USBICNF_TOGGLE	(1<<5)
 #define USBICNF_DBUF		(1<<4)
 #define USBICNF_STALL		(1<<3)
 
-#define USBIBAX		1
+#define USBIBAX(ep)		USBEPDEF(ep,1)
 
-#define USBICTX		2
+#define USBICTX(ep)		USBEPDEF(ep,2)
 #define USBICTX_NAK		(1<<7)
 
-#define USBISIZH		3
-#define USBISIZ		4
-#define USBIBAY		5
+#define USBISIZH(ep)		USBEPDEF(ep,3)
+#define USBISIZ(ep)		USBEPDEF(ep,4)
+#define USBIBAY(ep)		USBEPDEF(ep,5)
 
-#define USBICTY		6
+#define USBICTY(ep)		USBEPDEF(ep,6)
 #define USBICTY_NAK		(1<<7)
 
-#define USBOCNF		0
+#define USBOCNF(ep)		USBEPDEF(ep,0)
 #define USBOCNF_UBME		(1<<7)
 #define USBOCNF_ISO		(1<<6)
 #define USBOCNF_TOGGLE	(1<<5)
 #define USBOCNF_DBUF		(1<<4)
 #define USBOCNF_STALL		(1<<3)
 
-#define USBOBAX		1
+#define USBOBAX(ep)		USBEPDEF(ep,1)
 
-#define USBOCTX		2
+#define USBOCTX(ep)		USBEPDEF(ep,2)
 #define USBOCTX_NAK		(1<<7)
 
-#define USBOCTXH		3
-#define USBOSIZ		4
-#define USBOBAY		5
+#define USBOCTXH(ep)		USBEPDEF(ep,3)
+#define USBOSIZ(ep)		USBEPDEF(ep,4)
+#define USBOBAY(ep)		USBEPDEF(ep,5)
 
-#define USBOCTY		6
+#define USBOCTY(ep)		USBEPDEF(ep,6)
 #define USBOCTY_NAK		(1<<7)
 
-#define USBOCTYH		7
+#define USBOCTYH(ep)		USBEPDEF(ep,7)
 
 #endif

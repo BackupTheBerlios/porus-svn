@@ -9,6 +9,14 @@ This stack is designed to contain, as far as possible, all of the code common to
 
 While this document retains the host-centric terms used by USB, it is written from the perspective of a USB device.  We refer to In and Out endpoints, where an In endpoint is a data source from the device, and an Out endpoint is a data sink on the device; but when we speak of "sending" data, we are speaking of sending data from the device to the host.  For example, we might speak of sending data out of an In endpoint.
 
+*From WORDS by William Whitaker:
+
+Word mod o/u         
+An internal 'o' might be rendered by 'u'
+pur.us               ADJ    1 1 NOM S M POS             
+purus, pura -um, purior -or -us, purissimus -a -um  ADJ  
+pure, clean, unsoiled; free from defilement/taboo/stain; blameless, innocent; chaste, unpolluted by sex; plain/unadulterated; genuine; absolute; refined; clear, limpid, free of mist/cloud; ringing (voice); open (land); net; simple;
+
 Programming model
 =================
 
@@ -91,7 +99,7 @@ where `ep` is the endpoint number, and `data` is either 0, or points to the buff
 
 You return either a new buffer pointer or 0.  Returning a pointer is exactly like calling `usb_tx` with that pointer, except that you get no error code; the stack will not call you unless it is ready for another packet.  You can continuously send data this way.
 
-If the host requests data, but has none, PORUS (or, to be accurate, the USB hardware) will return a NAK.  PORUS unfortunately cannot notify you of this, as most USB hardware NAKs packets silently.
+If the host requests data, but has none, PORUS -- or, more likely, the USB hardware -- will return a NAK.  PORUS unfortunately cannot notify you of this, as most USB hardware NAKs packets silently.
 
 Data transmission on interrupt endpoints
 ----------------------------------------
@@ -130,21 +138,27 @@ On systems lacking such a timer, PORUS requests new data as soon as a packet has
 It is prudent to "prime the pump" on an isochronous IN endpoint by providing it with data, using usb_tx(), just after the endpoint is configured.
 
 Control endpoints
------------------
+=================
 
-A USB control endpoint does not operate fundamentally differently from "normal" endpoints, but it does use a token used by no other endpoint: the SETUP token.  The control endpoint uses a certain protocol based on this token, and since this protocol must be supported by every USB device, we have included support for it directly in the stack.
+A USB control endpoint does not operate fundamentally differently from "normal" endpoints, but it uses a token used by no other endpoint: the SETUP token.  The control endpoint uses a certain protocol based on this token, and since this protocol must be supported by every USB device, we have included support for it directly in the stack.
 
-In particular, all standard control requests are handled by the stack itself.  Configuration information -- including arrays, string constants, etc. -- are generated from a configuration file by an included Python program.  The resulting C code is compiled with the rest of the stack.
+In particular, all standard control requests are handled by the stack itself.  Configuration information -- including arrays, string constants, etc. -- is generated from a configuration file by an included Python program.  The resulting C code is compiled with the rest of the stack.
 
-Class and vendor requests cannot in general be handled this way; class modules may be included in future versions, but vendor modules cannot, for obvious reasons.  The two cases work exactly the same way and have congruent function sets and callbacks.  We will use vendor requests as an example, since it is not possible to build in high-level support for these.
+Class and vendor requests cannot in general be handled this way; class modules may be included in future versions, but vendor modules cannot.  The two cases work exactly the same way and have congruent function sets and callbacks.  We will use vendor requests as an example, since it is not possible to build in high-level support for these.
 
-When a SETUP packet arrives, the stack calls the following callback::
+PORUS takes advantage of the fact that only one control transaction can be active at a time.  This means that no FIFO or stack is needed.
 
-	int ctlcallback(usb_setup_t *setup);
+Control transactions can take a long time, but must be serviced quickly.  In most systems, this means that the transaction cannot be processed entirely under interrupt.  Therefore, control transactions are handled in two stages.  In the first stage, one of two callbacks is issued under interrupt; this is done when a SETUP packet arrives, and after any data has been received.  The callbacks each have the form::
 
-where `setup` is a structure containing the data in the SETUP packet, and the first data packet, if any.  You are expected to return 0, for success, or a negative error code.  Legal error codes are listed in the API reference.
+	void ctlcallback(void);
 
-All of the pertinent parameters are included in `setup`, so let us examine the `usb_setup_t` structure, which is not opaque::
+One of the callbacks is for write transactions, and the other is for read transactions.
+
+Once the callback has been issued, the second stage begins.  In the second stage, you parse the setup packet, perform any required actions, and return a status.  You can do this under interrupt in the transaction callback, or you can do it in a normal process.  The second stage ends when you call either usb_ctl_read_finish() or usb_ctl_write_finish(), depending on whether the transaction was a read or a write transaction.  This is explained in detail later on.
+
+The second stage does *not* end when you return from the control callback.  You must call one of the `finish` functions to complete a control transaction.
+
+The SETUP packet data is made available in a structure declared in a global variable called `usb_setup`.  The `usb_setup_t` structure is not opaque, and looks as follows::
 
 	typedef struct {
 		unsigned int dataDir:1, // 1 = device to host
@@ -154,31 +168,94 @@ All of the pertinent parameters are included in `setup`, so let us examine the `
 		u16 value;
 		u16 index;
 		u16 len;
-		u16 dataseq; // 0 for first data packet, 1 for next, etc.
-		u16 datalen;
 		usb_data_t *data;
+		u16 datact;
 	} usb_setup_t;
 
 Most of the members correspond directly to fields in the USB SETUP packet.  `dataDir`, `type`, and `recipient` are copied from the first byte in the SETUP packet (`bmRequestType`).  `request`, `value`, `index`, and `len` are copied from the corresponding words in the SETUP packet; although the names are slightly different, the correspondence should be plain.  We refer those unfamiliar with the SETUP packet to chapter 9 of the USB 2.0 specification.
 
-`dataseq`, `datalen` and `data` do not appear in the SETUP packet.  `dataseq` is used in SETUP transactions with multiple data packets; the handling of these is described later on.  `datalen` is the actual length of the data pointed to by `data`.
+Data format
+'''''''''''
 
-Some SETUP transactions have accompanying data; others have none, or require data to be returned.  The control callback suffices for each situation.
+Data for control transactions is stored the same way as other PORUS data.  For 8-bit memory, the data is byte-wide and stored as passed across USB.  For 16-bit memory, the high byte of each word is the earlier byte.
 
-SETUP packets with no additional data and no data requested are reported with both `datalen` and `data` set to 0.  You need only return a code indicating acceptance or error.
+For example, to return a single byte with 16-bit format, copy the byte to the upper half of the first word in the data array::
 
-SETUP packets with data to send, in which the data fits in a single DATA packet, are reported with `datalen` set to the length of data in the buffer, and with `data` pointing to the data.  Again, you need only return a code indicating acceptance or error.  `len` will be equal to `datalen`, and `dataseq` will be 0.
+	usbDataArray[0]=byte<<8;
 
-SETUP packets with data to send, in which the data does not fit in a single DATA packet, are reported with `datalen` set to the length of data in `data`, and with `data` pointing to the first chunk of data.  `len` is greater than `data` in this case.  When you return a success code, the stack will call you again with the same setup packet, but with `data` set to a new buffer containing the next chunk of data, and with `dataseq` incremented by one.  This continues until the last packet arrives.  With the last packet, `datalen` is less than `len`.
+Control write transactions
+''''''''''''''''''''''''''
 
-SETUP packets requesting data to be returned are reported with `data` set to 0.  `len` indicates the amount of requested data; you are expected to set `data` to a buffer containing the data, and to set `datalen` to the amount of data in it.  *Do not use a buffer you have allocated on the stack*, because it must be available after you return.
+A control write transaction may or may not have data.  If it has data, this is copied into a global array called `usb_ctl_write_data`.  The length of this array is set in the configuration file.  Any setup write packet whose length exceeds the length of this array is rejected with a control stall.  In this case the callback is not called.
 
-You should return as much data as you can, observing the maximum packet length; do not overrun the `data` buffer.  If you do not have enough space to copy all of the requested data, return with `datalen` set to maximum.  You will be called again with a new buffer to use, and with `dataseq` incremented by one.  Continue this until you have returned all of the data.  You can always return a short packet, hence ending the transaction early, by returning with `datalen` set to zero.
+The control write callback is called under interrupt.  If data is transmitted, it is copied into `usb_ctl_write_data` first.  Once you have finished processing the transaction, you must call `usb_ctl_write_end()` to finish the transaction::
+
+	void usb_ctl_write_end(int stat);
+
+`stat` is a status code.  0 indicates no error.  See the API reference for information on other error codes.  Most cause a control stall.
+
+You can call `usb_ctl_write_end()` either inside or outside the control write callback.  However, you should not do either or both; the control system is not reentrant.
+
+To handle standard control write transactions, call the following function::
+
+	int usb_ctl_write_std(void);
+
+If this returns 0, the transaction was not a standard transaction, and nothing was done.  If it returns something else, the transaction was a standard transaction and has been handled; you should do no further processing.  You should normally call this function before doing any other processing.
+
+Control read transactions
+'''''''''''''''''''''''''
+
+A control read transaction is reported through the control read callback, which is called under interrupt after the SETUP packet has been received.
+
+When you have finished processing the transaction, call the following function::
+
+	void usb_ctl_read_end(int stat, int len, usb_data_t *data);
+
+`stat` is a status code.  0 indicates no error.  See the API reference for information on other error codes.  Most cause a control stall.
+
+`data` points to data to be returned, if any.  If the SETUP packet requested no data -- i.e., `usb_setup.len` is zero -- `data` is ignored.  `data` is also ignored if `stat` indicates an error.
+
+`len` gives the number of bytes of data being returned through `data`.  `data` is expected to be `usb_setup.len` bytes in length or less.  If it is longer, it is truncated.
+
+To handle standard control read transactions, call the following function::
+
+	int usb_ctl_read_std(void);
+
+If this returns 0, the transaction was not a standard transaction, and nothing was done.  If it returns something else, the transaction was a standard transaction and has been handled; you should do no further processing.  You should normally call this function before doing any other processing.
+
+Control system states
+'''''''''''''''''''''
+
+PORUS' control transaction handling is done with a state machine.  You can check the state with `usb_ctl_state()`.
+
+The states are as follows:
+
+- USB_CTL_STATE_IDL - Idle
+
+Either no transactions are in progress, or all data has been copied to the hardware and the host is in the process of retrieving it.  PORUS is not waiting for the transaction to be finished.
+
+- USB_CTL_STATE_WWD - Waiting on Write Data
+
+A write SETUP has been received, and it specified data.  The stack is waiting to receive the data.
+
+If the SETUP does not specify any data, this state is not entered.
+
+- USB_CTL_STATE_RWD - Received Write Data
+
+All data from the write transaction has been received.  PORUS is waiting for you to finish the transaction.
+
+- USB_CTL_STATE_RRS - Received Read SETUP
+
+A read SETUP has been received.  PORUS is wating for you to finish the transaction.
+
+- USB_CTL_STATE_SRD - Sending Read Data
+
+`usb_ctl_read_end()` has been called, and data is being copied up.  PORUS is not waiting for user code.
 
 Using the stack
 ===============
 
-You must first construct a configuration file.  You then feed the configuration file into usbdescgen, which generates code for various things needed by PORUS.  The prime benefit of it is that it generates the USB descriptor packets for you.  This is required for enumeration.
+You must first construct a configuration file.  You then feed the configuration file into usbdescgen, which generates code for various things needed by PORUS.  The primary benefit of it is that it generates the USB descriptor packets for you.  This is required for enumeration.
 
 To write your configuration file, start with template.usbdesc.  This file is extensively commented; by reading and editing it you can easily construct your own configuration.
 

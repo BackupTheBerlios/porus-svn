@@ -60,7 +60,7 @@ address until the status phase is complete.  When the status phase
 completes in USB_STATE_WILL_ADDRESS, the stack changes the device address 
 and moves to USB_STATE_ADDRESS.
 
-This state is not part of the USB standard documentation.
+This state is not part of the USB standard.
 */
 #define USB_STATE_WILL_ADDRESS 6
 
@@ -94,6 +94,49 @@ This state is assigned by usb_init() and usb_disconnect().
 #define USB_CTL_PHASE_STATUS 3
 //@}
 
+//! Control machine states
+/*! These states are used by PORUS' control endpoint 
+handling system.  usb_ctl_state() reports this.
+*/
+//@{
+/*! Either no transactions are in progress, or all 
+data has been copied to the hardware and the host is 
+in the process of retrieving it.  In this state, 
+PORUS is not waiting 
+for a transaction to be finished.
+*/
+#define USB_CTL_STATE_IDLE 0
+/*! Waiting for write data.
+
+A write SETUP has been 
+received, and it specified data.  PORUS is waiting 
+to receive the data.
+
+If the SETUP does not say that any data will be transmitted (i.e., \p len 
+is zero), this state is not entered.
+*/
+#define USB_CTL_STATE_WWD 1
+/*! Received write data.
+
+All data from the write transaction has been 
+received.  PORUS is waiting for you to finish the transaction 
+using usb_ctl_write_end().
+*/
+#define USB_CTL_STATE_RWD 2
+/*! Received read setup.
+
+A read SETUP has been received.  PORUS is wating for you to 
+finish the transaction by returning data with usb_ctl_read_end().
+*/
+#define USB_CTL_STATE_RRS 3
+/*! Sending read data.
+
+usb_ctl_read_end() has been called, and data is being 
+copied up.  PORUS is not waiting for you to do anything.
+*/
+#define USB_CTL_STATE_SRD 4
+//@}
+
 #define USB_RCPT_DEV 0
 #define USB_RCPT_IFACE 1
 #define USB_RCPT_EP 2
@@ -104,6 +147,8 @@ This state is assigned by usb_init() and usb_disconnect().
 
 //! USB data packet
 typedef usb_data_t *usb_buffer_t;
+
+extern usb_data_t *usb_ctl_write_data;
 
 //! USB setup packet
 /*! usb_setup_t holds all of the fields in a USB setup packet, 
@@ -171,31 +216,7 @@ typedef struct usb_setup_t {
 		*/
 		dataDir:1,
 		type:2,
-		recipient:5,
-		//! Transaction phase
-		/*! This is provided as an aid to control callbacks.  It 
-		identifies to the callback what part of the phase it's 
-		being called in.  It can take on one of three values:
-
-		\arg \c USB_CTL_PHASE_SETUP The call is being made as a 
-		result of a setup packet, and possibly a data OUT packet 
-		as well (but only one).  When you get this, you should 
-		process and decode the setup packet fields.
-
-		\arg \c USB_CTL_PHASE_OUT Extra data, part of a long 
-		write transaction.  You only get this when there is more 
-		than one OUT packet as part of a data phase, and it starts 
-		on the second OUT; on the first OUT, USB_CTL_PHASE_SETUP 
-		is used.
-
-		\arg \c USB_CTL_PHASE_IN An IN is processed.  
-		You should update the data fields, if necessary.  You don't 
-		always get this; see usb_setup_t for more information.
-
-		This field is neither in the setup packet nor in the 
-		standard.
-		*/
-		phase:2;
+		recipient:5;
 	//! USB bRequest field
 	/*! Same as bRequest in the standard. */
 	u8 request;
@@ -212,68 +233,6 @@ typedef struct usb_setup_t {
 	a transaction.
 	*/
 	u16 len;
-	//! Data sequence number
-	/*! Number of bytes transmitted or received in the data phase of 
-	this transaction.
-	
-	\warning Treat this field as read-only; altering it will disrupt the 
-	transaction state machine.
-
-	This field is neither in the setup packet nor in the standard.
-	*/
-	u16 datact;
-	//! Current packet length
-	/*! This is the number of bytes of data currently stored in #data.  
-	<b>It is not the same as #len.</b>
-
-	For read transactions, if you set this field to zero, the stack 
-	will return a zero-length packet; this ends the transaction.  See 
-	usb_setup_t for information on why you would want to do this during 
-	a read.
-
-	The stack does not alter this field during a read transaction, 
-	except that for clamping it to \c USB_CTL_PACKET_SIZE.
-	It \e does alter it during a write transaction.
-
-	If #data is in packed-byte format, this 
-	field will not reflect its true length; use usb_mem_len() to 
-	calculate the actual data length.  For portability, you should 
-	always use usb_mem_len().
-
-	Note that if a transaction uses multiple data packets, this 
-	number will always be shorter than #len.  See usb_setup_t for 
-	details.
-
-	This field is neither in the setup packet nor in the standard.
-	*/
-	u16 datalen;
-	//! Data offset
-	/*! Offset into #data in bytes.  This is used only for setup 
-	reads; for setup writes, this field is always zero, and you 
-	can ignore it.
-
-	For read transactions, you can use this field to provide a byte-valued offset 
-	into #data, even on systems where the buffer is in packed-byte 
-	format.  You should almost always use #dataofs instead of 
-	pointing #data to different places in a buffer; this helps keep 
-	your code portable.
-	*/
-	u16 dataofs;
-	//! Data pointer
-	/*! Points to data received, or to data to be transmitted.
-	
-	During a write transaction with a data phase, this points to an 
-	internal buffer containing the received data.  It may 
-	be zero if there is no data phase, but do not rely on this.
-	
-	For a read transaction, you should point this to a buffer containing 
-	the data to be transmitted.  If you set it to zero, the stack will 
-	NAK the next IN token.  The stack will not alter this pointer 
-	during a read transaction; it trusts you to set it appropriately.
-
-	This field is neither in the setup packet nor in the standard.
-	*/
-	usb_data_t *data;
 } usb_setup_t;
 
 //! Receive callback
@@ -301,42 +260,10 @@ interrupt time.
 typedef void (*usb_cb_sof)(void);
 
 //! Control endpoint callback
-/*!
-\param[in] s Setup packet.
-\retval 0 Success.
-\retval -1 Error.  Returning this causes a protocol stall on the control 
-endpoints.
-*/
-typedef int (*usb_cb_ctl)(usb_setup_t *s);
+typedef void (*usb_cb_ctl)(void);
 
 typedef void (*usb_cb_state)(int state);
 typedef void (*usb_cb_done)(int epn);
-
-typedef struct usb_endpoint_data_t {
-	union {
-		usb_cb_out o;
-		usb_cb_in i;
-	} cb;
-	unsigned int bulkInProgress:1,
-		stop:1;
-	usb_data_t *go;
-	usb_buffer_t reload;
-	u32 buf;
-	// buflen = length of buffer in bytes
-	// count = no. of bytes transmitted / received
-	// rldBuflen = next buffer length
-	unsigned long buflen, count;
-	u16 lastlen; // length of last actual packet DMAed
-	usb_cb_done doneCallback;
-} usb_endpoint_data_t;
-
-typedef struct usb_endpoint_t {
-	unsigned int id:4, // endpoint number, 0-15
-		type:2; // endpoint type
-	unsigned short packetSize; // in bytes
-	usb_endpoint_data_t *data;
-	int in_timeout; // in frames
-} usb_endpoint_t;
 
 /*! \defgroup usbdata USB data manipulation
 */

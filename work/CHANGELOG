@@ -1,4 +1,14 @@
 
+*** MPA -- 2 Feb 2005
+
+- Major API change to control system.  The two-stage design is new, and allows us to move the control parsing etc. into a thread.  This is documented.
+- status struct is now global, and no longer passed around as a parameter
+- changed stdctl.c to ctl.c.  Will in future try to move all the non-hardware control system code there.
+- split up the standard control handlers into read and write functions, changed them to fit the new API
+- Added a new config parameter, ctlWriteBufLen, which defines the length 
+in bytes of the control recieve array
+- Control receive array is now global and we declare it in usbconfig.c
+
 *** MPA -- 10 Oct 2004 5:43 PM
 
 - usbdescgen was generating a bad endpoints array.  This showed up for IN endpoints.  Fixed
