@@ -1,6 +1,9 @@
 
 /* :mode=c: */
 
+//! \addtogroup pub_ctl
+//@{
+
 /*! \def USB_CTL_PACKET_SIZE
 \brief Size of a control data packet
 
@@ -8,11 +11,16 @@ The maximum size, in bytes, of data packets in control transactions.
 */
 
 /*! \def USB_CTL_WRITE_BUF_SIZE
-\brief Size of recieve buffer for control transactions
+\brief Size of receive buffer for control transactions
 
 The length in bytes of the statically declared receive array used to 
 receive data from control transactions.
 */
+
+//@}
+
+//! \addtogroup pub_gen
+//@{
 
 /*! \def usb_mem_len(l)
 \brief Convert bytes to native USB buffer lengths
@@ -22,6 +30,11 @@ This macro converts a length in bytes to a length in either bytes, words, or lon
 \param l Length in bytes
 \return Length in native \c usb_data_t units
 */
+
+//@}
+
+//! \addtogroup pub_ctl
+//@{
 
 /*! \fn void usb_get_device_desc(usb_data_t **bytes, int *len);
 \brief Get device descriptor
@@ -54,7 +67,8 @@ Returns the endpoint structure identified by \p config and \p ep, or 0 if none s
 \return Pointer to the endpoint structure, or 0 if none found
 */
 
-/*! \fn int usb_have_config(unsigned int config)
+/*! \ingroup pub_gen pub_ctl
+\fn int usb_have_config(unsigned int config)
 \brief See whether configuration exists
 
 Returns non-zero if the configuration numbered \p config exists, 0 otherwise.
@@ -89,3 +103,5 @@ The configuration file must contain a line setting the serial number; if it does
 
 \param[in] bytes Serial number descriptor.
 */
+
+//@}

@@ -1,11 +1,11 @@
-# Doxyfile 1.3.8
+# Doxyfile 1.4.1
 
 #---------------------------------------------------------------------------
 # Project related configuration options
 #---------------------------------------------------------------------------
-PROJECT_NAME           = mmb0test_usb
-PROJECT_NUMBER         = 0.1
-OUTPUT_DIRECTORY       = C:/src/mmb0tests/usb/dox
+PROJECT_NAME           = PORUS
+PROJECT_NUMBER         = 0.4
+OUTPUT_DIRECTORY       = doc
 CREATE_SUBDIRS         = NO
 OUTPUT_LANGUAGE        = English
 USE_WINDOWS_ENCODING   = NO
@@ -65,6 +65,8 @@ GENERATE_DEPRECATEDLIST= YES
 ENABLED_SECTIONS       = 
 MAX_INITIALIZER_LINES  = 30
 SHOW_USED_FILES        = YES
+SHOW_DIRECTORIES       = YES
+FILE_VERSION_FILTER    = 
 #---------------------------------------------------------------------------
 # configuration options related to warning and progress messages
 #---------------------------------------------------------------------------
@@ -72,15 +74,18 @@ QUIET                  = NO
 WARNINGS               = YES
 WARN_IF_UNDOCUMENTED   = YES
 WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
 WARN_FORMAT            = "$file:$line: $text"
 WARN_LOGFILE           = 
 #---------------------------------------------------------------------------
 # configuration options related to the input files
 #---------------------------------------------------------------------------
-INPUT                  = C:/src/mmb0tests/usb/usb.h \
-                         C:/src/mmb0tests/usb/usbtypes.h \
-                         C:/src/mmb0tests/usb/usbconfig.h \
-                         C:/src/mmb0tests/usb/usb_5509.h
+INPUT                  = C:/src/porus/usbtypes.h \
+                         C:/src/porus/usb.h \
+                         C:/src/porus/usbhw.h \
+                         C:/src/porus/usbpriv.h \
+                         C:/src/porus/doc/main.doc \
+                         C:/src/porus/doc/usbconfig.doc
 FILE_PATTERNS          = *.h
 RECURSIVE              = NO
 EXCLUDE                = 
@@ -89,7 +94,7 @@ EXCLUDE_PATTERNS       =
 EXAMPLE_PATH           = 
 EXAMPLE_PATTERNS       = *
 EXAMPLE_RECURSIVE      = NO
-IMAGE_PATH             = 
+IMAGE_PATH             = doc
 INPUT_FILTER           = 
 FILTER_PATTERNS        = 
 FILTER_SOURCE_FILES    = NO
@@ -206,18 +211,22 @@ HIDE_UNDOC_RELATIONS   = YES
 HAVE_DOT               = NO
 CLASS_GRAPH            = YES
 COLLABORATION_GRAPH    = YES
+GROUP_GRAPHS           = YES
 UML_LOOK               = NO
 TEMPLATE_RELATIONS     = NO
 INCLUDE_GRAPH          = YES
 INCLUDED_BY_GRAPH      = YES
 CALL_GRAPH             = NO
 GRAPHICAL_HIERARCHY    = YES
+DIRECTORY_GRAPH        = YES
 DOT_IMAGE_FORMAT       = png
 DOT_PATH               = 
 DOTFILE_DIRS           = 
 MAX_DOT_GRAPH_WIDTH    = 1024
 MAX_DOT_GRAPH_HEIGHT   = 1024
 MAX_DOT_GRAPH_DEPTH    = 1000
+DOT_TRANSPARENT        = NO
+DOT_MULTI_TARGETS      = NO
 GENERATE_LEGEND        = YES
 DOT_CLEANUP            = YES
 #---------------------------------------------------------------------------

@@ -6,18 +6,158 @@
 
 extern usb_setup_t usb_setup;
 
+/*! \defgroup pub_gen Main public API
+@{
+*/
+
 //! Initialisation function
+/*! Initialises the stack.  Call this before calling any of the other 
+functions in PORUS.
+
+\p param points to parameters specific to the hardware port, if there 
+are any.  See the port's documentation for details.
+*/
 void usb_init(void *param);
 
+//! Set start-of-frame callback
+/*! Sets a callback for Start Of Frame.  The callback will be called 
+under interrupt whenever a SOF token is received.  The callback takes 
+no arguments and returns nothing.
+
+This is by default not set.  If this is not set, SOF interrupts are
+ignored.
+
+To unset the callback, pass 0 for \p cb .
+*/
 void usb_set_sof_cb(usb_cb cb);
+
+//! Set pre-SOF callback
+/*! Sets a callback for pre-SOF, if supported by the hardware.
+
+Some USB peripherals offer a pre-SOF interrupt.  This is timed to 
+occur at a fixed time before the next SOF interrupt occurs.  If the 
+hardware supports it, you can set this time using usb_set_presof_time().  
+The port documentation should say whether it supports this.
+
+The callback takes no arguments and returns nothing.
+
+To unset the callback, pass 0 for \p cb .
+*/
 void usb_set_presof_cb(usb_cb cb);
 
-int usb_stall(u8 epnum);
-int usb_unstall(u8 epnum);
-int usb_is_stalled(u8 epnum);
+//! Set pre-SOF time
+/*! Sets the amount of time between pre-SOF and SOF, on hardware that 
+supports it.  \p time is in microseconds.
 
+The port documentation should say whether this is supported.
+*/
+void usb_set_presof_time(u16 time);
+
+//! Get node's USB state
+/*! Returns the current USB state, e.g. attached, powered, configured, 
+etc.
+*/
 int usb_get_state(void);
+
+//! Get node's configuration number
+/*! Returns the current configuration number, or 0 if the node is not 
+configured.
+*/
 int usb_get_config(void);
+
+//! Attach the node
+/*! Causes the USB hardware to attach to the bus, on systems that 
+support this.  On systems without this capability, nothing happens.
+Usually this causes the pullup to be activated.
+
+If the state is not \c USB_STATE_DETACHED, this is ignored.
+
+Following this call, state becomes \c USB_STATE_ATTACHED. 
+*/
+void usb_attach(void);
+
+//! Detach the node
+/*! Causes the USB hardware to detach from the bus, on systems that 
+support this.  On systems without this capability, nothing happens.  
+Usually this causes the pullup to be turned off.
+
+If the state is \c USB_STATE_ATTACHED, this is ignored.
+
+If any transactions are in progress when this call is made, the result 
+is unknown.  Do not call this while a transaction is in progress.
+
+Following this call, state becomes \c USB_STATE_DETACHED.
+*/
+void usb_detach(void);
+
+//! Whether node is attached
+/*! Returns non-zero if the node is attached.
+\retval 0 Node is not attached
+\retval 1 Node is attached
+*/
+int usb_is_attached(void);
+
+//! Signal the host to wake up
+/*! Initiate remote wakeup on the host. */
+void usb_remote_wakeup(void);
+
+//int usb_set_out_cb(int cfg, int epn, usb_cb_out cb);
+//int usb_set_in_cb(int cfg, int epn, usb_cb_in cb);
+void usb_set_state_cb(usb_cb_int cb);
+//void usb_set_epstat_cb(int epn, usb_cb_done cb);
+//int usb_get_epstat(int epn);
+
+//! Get currently active configuration number
+/*! Returns the number of the currently active configuration, 
+or -1 if no configuration is active. */
+int usb_get_config(void);
+
+//@}
+
+/*! \defgroup pub_nonctl General endpoint functions
+
+@{
+*/
+
+//! Stall an endpoint
+/*! Stalls the given endpoint.  Does nothing if the endpoint is stalled 
+already.
+
+This cannot be used for the control endpoint; to stall a control 
+endpoint, call usb_ctl_read_end() or usb_ctl_write_end() with a status 
+of 1.
+
+\param[in] epnum Endpoint number
+\retval 0 Success
+\retval -1 Invalid endpoint
+*/
+int usb_stall(u8 epnum);
+
+//! Unstall an endpoint
+/*! Unstalls the given endpoint.  Does nothing if the endpoint is not 
+stalled.
+
+This cannot be used for the control endpoint.  Control endpoints are 
+unstalled when a SETUP arrives.
+
+\param[in] epnum Endpoint number
+\retval 0 Success
+\retval -1 Invalid endpoint
+*/
+int usb_unstall(u8 epnum);
+
+//! Find out whether endpoint is stalled
+/*! Returns 1 if the given endpoint is stalled, 0 if the endpoint 
+is not stalled, or -1 if the endpoint number is invalid or if called 
+on the control endpoint.
+
+This cannot be used for control endpoints.
+
+\retval 0 Endpoint is not stalled
+\retval 1 Endpoint is stalled
+\retval -1 Invalid endpoint
+*/
+int usb_is_stalled(u8 epnum);
 
 //! Perform a bulk transmission
 /*! Transmits data on a bulk endpoint.
@@ -83,50 +223,6 @@ requests from the host.
 */
 void usb_bulk_cancel(u8 epn);
 
-void usb_dev_reset(void);
-
-//! Attach the node
-/*! Causes the USB hardware to attach to the bus, on systems that 
-support this.  On systems without this capability, nothing happens.
-Usually this causes the pullup to be activated.
-
-If the state is not \c USB_STATE_DETACHED, this is ignored.
-
-Following this call, state becomes \c USB_STATE_ATTACHED. 
-*/
-void usb_attach(void);
-
-//! Detach the node
-/*! Causes the USB hardware to detach from the bus, on systems that 
-support this.  On systems without this capability, nothing happens.  
-Usually this causes the pullup to be turned off.
-
-If the state is \c USB_STATE_ATTACHED, this is ignored.
-
-If any transactions are in progress when this call is made, the result 
-is unknown.  Do not call this while a transaction is in progress.
-
-Following this call, state becomes \c USB_STATE_DETACHED.
-*/
-void usb_detach(void);
-
-//! Whether node is attached
-/*! Returns non-zero if the node is attached.
-\retval 0 Node is not attached
-\retval 1 Node is attached
-*/
-int usb_is_attached(void);
-
-//! Signal the host to wake up
-/*! Initiate remote wakeup on the host. */
-void usb_remote_wakeup(void);
-
-//int usb_set_out_cb(int cfg, int epn, usb_cb_out cb);
-//int usb_set_in_cb(int cfg, int epn, usb_cb_in cb);
-void usb_set_state_cb(usb_cb_int cb);
-//void usb_set_epstat_cb(int epn, usb_cb_done cb);
-//int usb_get_epstat(int epn);
-
 //! Set endpoint's timeout
 /*! Set the endpoint's timeout.
 
@@ -152,6 +248,13 @@ If this call is made for an invalid endpoint, nothing is done.
 \param timeout Timeout in milliseconds.
 */
 void usb_set_ep_timeout(int epn, u16 timeout);
+
+//@}
+
+/*! \defgroup pub_ctl Control endpoint functions
+
+@{
+*/
 
 /*! \fn void usb_ctl(void)
 \brief Callback for control transactions
@@ -200,9 +303,6 @@ if 0, an ACK is returned.
 */
 void usb_ctl_write_end(int stat);
 
-//! Get currently active configuration number
-/*! Returns the number of the currently active configuration, 
-or -1 if no configuration is active. */
-int usb_get_config(void);
+//@}
 
 #endif
