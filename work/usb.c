@@ -1,6 +1,5 @@
 
-#include "usb.h"
-#include "usbpriv.h"
+#include "usbhw.h"
 
 static volatile struct {
 	unsigned int suspended:1,
@@ -9,17 +8,15 @@ static volatile struct {
 	u8 config;
 } flags;
 
-static usb_cb_sof sofCB, preSOFCB;
-static usb_cb_state stateChangeCallback;
-
-int usb_ctl(usb_setup_t *setup);
+static usb_cb sofCB, preSOFCB;
+static usb_cb_int stateChangeCallback;
 
 void usb_cancel(u8 epn)
 {
 	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
 
 	if (!ep) return;
-	usbhw_cancel(epn);
+	usbhw_cancel(ep);
 	ep->data->xferInProgress=0;
 }
 
@@ -62,29 +59,27 @@ void usb_evt_txdone(usb_endpoint_t *ep)
 
 // ### FIXME: make receive work
 
-#if 0
-void usb_set_sof_cb(usb_cb_sof cb)
+void usb_set_sof_cb(usb_cb cb)
 {
 	if (!cb) {
-		USBIE&=~USBIE_SOF;
+		usbhw_int_dis_sof();
 		sofCB=cb;
 	} else {
 		sofCB=cb;
-		USBIE|=USBIE_SOF;
+		usbhw_int_en_sof();
 	}
 }
 
-void usb_set_presof_cb(usb_cb_sof cb)
+void usb_set_presof_cb(usb_cb cb)
 {
 	if (!cb) {
-		USBIE&=~USBIE_PSOF;
+		usbhw_int_dis_presof();
 		preSOFCB=cb;
 	} else {
 		preSOFCB=cb;
-		USBIE|=USBIE_PSOF;
+		usbhw_int_en_presof();
 	}
 }
-#endif
 
 void usb_set_address(u8 adr)
 {
@@ -132,6 +127,20 @@ static int activate_endpoints(int config)
 		if (usbhw_activate_ep(ep))
 			return -1;
 	}
+	return 0;
+}
+
+static void deactivate_endpoints(void)
+{
+	int i, config;
+	usb_endpoint_t *ep;
+
+	config=usb_get_config();
+	for (i=1;i<32;++i) {
+		ep=usb_get_ep(config,i);
+		if (!ep) continue;
+		usbhw_deactivate_ep(ep);
+	}
 }
 
 int usb_set_config(int cfn)
@@ -174,12 +183,25 @@ void usb_set_state(int state)
 	if (stateChangeCallback) stateChangeCallback(state);
 }
 
+void usb_evt_sof(void)
+{
+	if (sofCB) sofCB();
+}
+
+void usb_evt_presof(void)
+{
+	if (preSOFCB) preSOFCB();
+}
+
 void usb_evt_reset(void)
 {
+	deactivate_endpoints();
+
 	usb_set_state(USB_STATE_DEFAULT);
+	usbhw_reset();
 	// sof & presof interrupts only set if we have callbacks
-	//if (sofCB) USBIE|=USBIE_SOF;
-	//if (preSOFCB) USBIE|=USBIE_PSOF;
+	if (sofCB) usbhw_int_en_sof();
+	if (preSOFCB) usbhw_int_en_presof();
 
 	/* note: since we use FRSTE=1 we know the USB module is already (mostly) 
 	at power-up values, so we don't need to reset addresses etc etc */
@@ -197,10 +219,11 @@ void usb_evt_resume(void)
 	if (stateChangeCallback) stateChangeCallback(flags.state);
 }
 
-void usb_set_state_cb(usb_cb_state cb)
+void usb_set_state_cb(usb_cb_int cb)
 {
 	stateChangeCallback=cb;
 }
+
 
 #if 0
 /* codes: -1: no such OUT ep */
@@ -242,7 +265,6 @@ int usb_set_in_cb(int cfg, int epn, usb_cb_in cb)
 	}
 	return 0;
 }
-#endif
 
 void usb_set_txdone_cb(int epn, usb_cb_done cb)
 {
@@ -252,6 +274,7 @@ void usb_set_txdone_cb(int epn, usb_cb_done cb)
 	if (epn<9) return;
 	//ep->data->doneCallback=cb;
 }
+#endif
 
 int usb_is_attached(void)
 {
@@ -298,7 +321,7 @@ void usb_init(void *param)
 		if (!ep) continue;
 		//ep->data->go=0;
 		//ep->data->reload=0;
-		if (i>8) {
+		if (i>15) {
 			//ep->data->cb.i=usb_bulk_in;
 			ep->data->xferInProgress=0;
 			//ep->data->stop=0;
@@ -310,4 +333,5 @@ void usb_init(void *param)
 		}
 	}
 	usbhw_init(param);
+	usbhw_int_en();
 }

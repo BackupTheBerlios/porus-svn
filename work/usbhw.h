@@ -3,6 +3,7 @@
 #define GUARD_usbhw_h
 
 #include "usbpriv.h"
+#include <portconf.h>
 
 //! Transmit a single USB packet
 /*! Submits the packet request \p pkt for transmission.  When it is 

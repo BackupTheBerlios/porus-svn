@@ -2,7 +2,7 @@
 #include "usbhw.h"
 #include <bios.h>
 #include <c55.h>
-#include <port/c55x/usb_5509.h>
+#include <usb_5509.h>
 
 #define pkt_from_pkt(P) ((usb_packet_req_t *)((P)->ep->data->hwdata))
 
@@ -115,8 +115,12 @@ int usbhw_get_setup(usb_setup_t *s)
 	if (s->dataDir)
 		USBCTL|=USBCTL_DIR;
 	else {
-		USBCTL&=~USBCTL_DIR;
-		USBOCT0=0;
+		if (s->len) {
+			USBCTL&=~USBCTL_DIR;
+			USBOCT0=0;
+		} else {
+			//USBCTL|=USBCTL_DIR;
+		}
 	}
 	return 0;
 }
@@ -158,12 +162,16 @@ int usbhw_get_ctl_write_data(u8 *len, usb_data_t *d)
 
 void usbhw_ctl_write_handshake(void)
 {
+	USBOCT0=USBOCT0_NAK;
 	USBICT0=0;
+	//USBCTL|=USBCTL_DIR;
 }
 
 void usbhw_ctl_read_handshake(void)
 {
+	USBICT0=USBICT0_NAK;
 	USBOCT0=0;
+	//USBCTL&=~USBCTL_DIR;
 }
 
 #if 0
@@ -489,6 +497,7 @@ int usbhw_activate_ep(usb_endpoint_t *ep)
 void usbhw_deactivate_ep(usb_endpoint_t *ep)
 {
 	USBICNF(ep->id)=0;
+	if (ep->data->hwdata) free(ep->data->hwdata);
 }
 
 //### TODO: support APLL on 5507 / 5509A
@@ -507,7 +516,7 @@ void usbhw_reset(void)
 	USBOEPIE|=1;
 	USBIEPIE|=1;
 	// now we can respond to everything ..
-	USBIE=USBIE_RSTR|USBIE_SUSR|USBIE_RESR|USBIE_SETUP|USBIE_STPOW;
+	USBIE=USBIE_RSTR|USBIE_SUSR|USBIE_RESR|USBIE_SETUP;
 	USBOCNF0|=USBOCNF0_UBME|USBOCNF0_INTE;
 	USBICNF0|=USBICNF0_UBME|USBICNF0_INTE;
 
@@ -522,7 +531,7 @@ void usbhw_attach(void)
 	// reset, suspend, and resume
 	usbhw_int_en();
 	USBCTL|=USBCTL_FEN;
-	USBIE=USBIE_RSTR|USBIE_SUSR|USBIE_RESR;
+	USBIE=USBIE_RSTR|USBIE_SUSR|USBIE_RESR|USBIE_SETUP;
 	USBCTL|=USBCTL_CONN;
 }
 

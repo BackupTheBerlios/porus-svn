@@ -2,7 +2,7 @@
 #ifndef GUARD_usbpriv_h
 #define GUARD_usbpriv_h
 
-#include "usbconfig.h"
+#include "usb.h"
 
 typedef struct usb_packet_req_t {
 	unsigned int done:1, // 0 = request waiting, 1 = request complete
@@ -45,6 +45,8 @@ int usb_get_state(void);
 void usb_set_address(u8 adr);
 int usb_set_config(int cfn);
 int usb_get_config(void);
+
+int usb_ctl_state(void);
 
 void usb_ctl_init(void);
 

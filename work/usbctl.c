@@ -1,6 +1,5 @@
 
-#include "usb.h"
-#include "usbpriv.h"
+#include "usbhw.h"
 
 #define USB_DESC_DEVICE 1
 #define USB_DESC_CONFIGURATION 2
@@ -209,7 +208,7 @@ static int usb_ctl_std_get_descriptor(void)
 	return 0;
 }
 
-static int usb_ctl_std_read(void)
+static void usb_ctl_std_read(void)
 {
 	int err;
 
@@ -233,10 +232,9 @@ static int usb_ctl_std_read(void)
 	}
 	if (err)
 		usb_ctl_read_end(1,0,0);
-	return 1;
 }
 
-static int usb_ctl_std_write(void)
+static void usb_ctl_std_write(void)
 {
 	int err;
 
@@ -260,24 +258,32 @@ static int usb_ctl_std_write(void)
 		break;
 	}
 	if (err)
-		usb_ctl_read_end(1,0,0);
-	return 1;
-}
-
-int usb_ctl_std(void)
-{
-	if (ctlflags.state!=USB_CTL_STATE_RRS) return -1;
-	if (usb_setup.type!=USB_CTL_TYPE_STD) return 0;
-	if (usb_setup.dataDir)
-		return usb_ctl_std_read();
+		usb_ctl_write_end(1);
 	else
-		return usb_ctl_std_write();
+		usb_ctl_write_end(0);
 }
 
 void usb_ctl_stall(void)
 {
 	ctlflags.state=USB_CTL_STATE_IDLE;
 	usbhw_ctl_stall();
+}
+
+int usb_ctl_std(void)
+{
+	if (ctlflags.state!=USB_CTL_STATE_RRS&&ctlflags.state!=USB_CTL_STATE_RWD) {
+		usb_ctl_stall();
+		return -1;
+	}
+	if (usb_setup.type!=USB_CTL_TYPE_STD)
+		return 0;
+	else {
+		if (usb_setup.dataDir)
+			usb_ctl_std_read();
+		else
+			usb_ctl_std_write();
+		return 1;
+	}
 }
 
 void usb_evt_ctl_rx(void)
@@ -313,10 +319,10 @@ void usb_evt_ctl_tx(void)
 	if (l>USB_CTL_PACKET_SIZE) l=USB_CTL_PACKET_SIZE;
 	if (l<0) l=0;
 	if (l) {
-		usbhw_put_ctl_read_data(l,usb_ctl_write_data+usb_mem_len(ctlflags.ct+ctlflags.ofs));
+		usbhw_put_ctl_read_data(l,ctlflags.txdata+usb_mem_len(ctlflags.ct+ctlflags.ofs));
 		ctlflags.ct+=l;
 	}
-	if (!l||(ctlflags.ct>=usb_setup.len)) {
+	else if (!l||(ctlflags.ct>=usb_setup.len)) {
 		usbhw_ctl_read_handshake();
 		ctlflags.state=USB_CTL_STATE_IDLE;
 	}
@@ -332,6 +338,7 @@ void usb_ctl_read_end(int stat, int len, usb_data_t *data)
 	ctlflags.ct=0;
 	ctlflags.ofs=0;
 	ctlflags.txdata=data;
+	if (len>usb_setup.len) len=usb_setup.len;
 	ctlflags.txlen=len;
 	usb_evt_ctl_tx();
 }

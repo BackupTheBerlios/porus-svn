@@ -2,7 +2,6 @@
 #ifndef GUARD_usb_h
 #define GUARD_usb_h
 
-// usbconfig.h is a generated file
 #include "usbconfig.h"
 
 extern usb_setup_t usb_setup;
@@ -10,11 +9,8 @@ extern usb_setup_t usb_setup;
 //! Initialisation function
 void usb_init(void *param);
 
-void usb_lock(void);
-void usb_unlock(void);
-
-void usb_set_sof_cb(usb_cb_sof cb);
-void usb_set_presof_cb(usb_cb_sof cb);
+void usb_set_sof_cb(usb_cb cb);
+void usb_set_presof_cb(usb_cb cb);
 
 int usb_stall(u8 epnum);
 int usb_unstall(u8 epnum);
@@ -115,7 +111,10 @@ Following this call, state becomes \c USB_STATE_DETACHED.
 void usb_detach(void);
 
 //! Whether node is attached
-/*! Returns non-zero if the node is attached. */
+/*! Returns non-zero if the node is attached.
+\retval 0 Node is not attached
+\retval 1 Node is attached
+*/
 int usb_is_attached(void);
 
 //! Signal the host to wake up
@@ -124,9 +123,9 @@ void usb_remote_wakeup(void);
 
 //int usb_set_out_cb(int cfg, int epn, usb_cb_out cb);
 //int usb_set_in_cb(int cfg, int epn, usb_cb_in cb);
-void usb_set_state_cb(usb_cb_state cb);
-void usb_set_epstat_cb(int epn, usb_cb_done cb);
-int usb_get_epstat(int epn);
+void usb_set_state_cb(usb_cb_int cb);
+//void usb_set_epstat_cb(int epn, usb_cb_done cb);
+//int usb_get_epstat(int epn);
 
 //! Set endpoint's timeout
 /*! Set the endpoint's timeout.
@@ -184,7 +183,7 @@ int usb_ctl_std(void);
 If \p stat is 1, the control endpoint is stalled.  Otherwise, data is 
 returned using \p len and \p data .
 
-\param[in] stat Status.  0 means OK, 1 means stall.
+\param[in] stat Status.  0 to ACK, 1 to stall.
 \param[in] len Length of returned data in bytes.  Ignored if 
 \p stall is 1.
 \param[in] data Pointer to data to transmit.  Ignored if 
@@ -192,10 +191,14 @@ returned using \p len and \p data .
 */
 void usb_ctl_read_end(int stat, int len, usb_data_t *data);
 
+//! Conclude a control write
+/*! Ends a control write, either with a stall or with an ACK 
+handshake.  If \p stat is 1, the control endpoint is stalled; 
+if 0, an ACK is returned.
+
+\param[in] stat Status.  0 to ACK, 1 to stall.
+*/
 void usb_ctl_write_end(int stat);
-int usb_ctl_state(void);
-void usb_set_ctl_in_cb(usb_cb_ctl cb);
-void usb_set_ctl_out_cb(usb_cb_ctl cb);
 
 //! Get currently active configuration number
 /*! Returns the number of the currently active configuration, 

@@ -257,13 +257,9 @@ typedef int (*usb_cb_in)(int epn, u32 *buf, u16 *len);
 /*! Called when a SOF (start-of-frame) token is received.  This is called at 
 interrupt time.
 */
-typedef void (*usb_cb_sof)(void);
+typedef void (*usb_cb)(void);
 
-//! Control endpoint callback
-typedef void (*usb_cb_ctl)(void);
-
-typedef void (*usb_cb_state)(int state);
-typedef void (*usb_cb_done)(int epn);
+typedef void (*usb_cb_int)(int state);
 
 /*! \defgroup usbdata USB data manipulation
 */
@@ -372,7 +368,7 @@ typedef struct usb_endpoint_data_t {
 	// reqlen = length of buffer in bytes
 	// actlen = no. of bytes transmitted / received
 	u32 reqlen, actlen;
-	usb_cb_done done_cb;
+	//usb_cb_done done_cb;
 	void *hwdata; // used by the hardware layer for whatever
 } usb_endpoint_data_t;
 

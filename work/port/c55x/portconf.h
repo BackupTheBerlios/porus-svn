@@ -4,6 +4,6 @@
 
 //#define USBHW_HAVE_BLOCKING
 //#define USBHW_HAVE_TIMEOUT
-//#define USBHW_HAVE_DETACH
+#define USBHW_HAVE_ATTACH
 
 #endif
