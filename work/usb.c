@@ -2,8 +2,9 @@
 #include "usb.h"
 #include "usb_5509.h"
 
-static usb_cb_ctl ctlCallback;
+static usb_cb_ctl stdCtlCallback, classCtlCallback, vendorCtlCallback;
 static usb_cb_sof sofCB, preSOFCB;
+static usb_cb_state stateChangeCallback;
 static int locklevel;
 static int usbState, usbSuspended;
 static u8 usbAddress;
@@ -34,12 +35,29 @@ void usb_unlock_all(void)
 	IRQ_enable(IRQ_EVT_USB);
 }
 
-void usb_ctl_req_std(void *data, int arg);
-
 static void usb_ctl_stall(void)
 {
 	USBICNF0|=USBICNF0_STALL;
 	USBOCNF0|=USBOCNF0_STALL;
+}
+
+static int ctlCallback(usb_setup_t *setup)
+{
+	switch(setup->type) {
+	case USB_CTL_TYPE_STD:
+		return stdCtlCallback(setup);
+	case USB_CTL_TYPE_CLASS:
+		if (classCtlCallback)
+			return classCtlCallback(setup);
+		break;
+	case USB_CTL_TYPE_VENDOR:
+		if (vendorCtlCallback)
+			return vendorCtlCallback(setup);
+		break;
+	default:
+		break;
+	}
+	return -1;
 }
 
 static void isrOUT0(void)
@@ -82,14 +100,6 @@ static void isrOUT0(void)
 static void isrIN0(void)
 {
 	int i,l;
-
-#ifdef DEFERRED_ADDRESS
-	if (usbState==USB_STATE_WILL_ADDRESS&&(USBICT0==USBICT0_NAK)) { // we got here b/c of handshake
-		USBADDR=usbAddress&0x7f;
-		usb_set_state(USB_STATE_ADDRESS);
-		return;
-	}
-#endif
 
 	if (!ctlCallback||!usbSetup.len||!usbSetup.data) {
 		usb_ctl_stall();
@@ -167,16 +177,6 @@ static void isrSetup(void)
 			   also we should keep naking until we have something ready ... */
 			if (ctlCallback(&usbSetup)) usb_ctl_stall(); // dispatch now
 			USBICT0=0;	// expecting an IN handshake
-#ifdef USB_DEFERRED_ADDRESS
-			/* special case: we need to know when the IN ACK comes 
-			   so we can know it's OK to actually set the address */
-			if (usbState==USB_STATE_WILL_ADDRESS) {
-				//USBCTL|=USBCTL_DIR; // we will get an intr for the handshake
-				while (!(USBICT0&USBICT0_NAK));
-				USBADDR=usbAddress;
-				usb_set_state(USB_STATE_ADDRESS);
-			}
-#endif
 		}
 	}
 }
@@ -209,14 +209,16 @@ static void usb_resume(void)
 	usb_set_state_unsuspend();
 }
 
-int usb_is_buf_idle(int epn, usb_buffer_t buf)
+int usb_is_buf_idle(int epn, usb_data_t *buf)
 {
 	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
 
 	if (!ep) return -1;
 	if (!buf&7) return -1;
 	if (epn>8) {
-		if (usb_buf_data(buf)!=usb_dma_ptr(epn)) return 1;
+		if (ep->data->go!=buf) return 1;
+		if (ep->data->goBusy) return 0;
+		//if (usb_buf_data(buf)!=usb_dma_ptr(epn)) return 1;
 	} else {
 		if (buf!=usb_dma_ptr(epn)) return 1;
 	}
@@ -227,6 +229,7 @@ static void epGo(int epn, usb_endpoint_t *ep, usb_buffer_t buf)
 {
 	ep->data->go=buf;
 	usb_dma_set_ptr(epn,buf);
+	ep->data->goBusy=1;
 	/* this should not even work, but in fact it's required */
 	USBDMA(epn,USBODCT)=0;
 	USBDMA(epn,USBODSIZ)=ep->packetSize;
@@ -270,21 +273,29 @@ static void isrIN(int epn)
 	// ### this isn't done yet!
 }
 
-int usb_tx(u8 epn, usb_buffer_t data)
+int usb_tx(u8 epn, usb_data_t *data, u16 len)
 {
 	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
 
 	if (!ep) return -1;
 	//### TODO: support reload
-	if (USBDMA(epn,USBIDCTL)&USBIDCTL_GO) return -2;
-	if (!((USBEPDEF(epn,USBICTX)&USBICTX_NAK)||
-		(USBEPDEF(epn,USBICTY)&USBICTY_NAK))) return -3;
-	// open slot & no DMA in progress, let's do it ..
-	usb_dma_set_ptr(epn,usb_buf_data(data));
+	if (ep->data->goBusy) return -2;
+	ep->data->goBusy=1;
+	ep->data->go=data;
+	usb_dma_set_ptr(epn,data);
 	USBDMA(epn,USBIDCT)=0;
-	USBDMA(epn,USBIDSIZ)=usb_buf_len(data);
+	USBDMA(epn,USBIDSIZ)=len;
 	USBDMA(epn,USBIDCTL)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END;
 	return 0;
+}
+
+static void isrDMAINGO(int epn)
+{
+	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
+
+	if (!ep) return;
+
+	ep->data->goBusy=0;
 }
 
 /* we only get this if there was no reload */
@@ -311,14 +322,6 @@ static void isrDMAOUTRLD(int epn)
 	ep->data->go=ep->data->reload;
 	if (!buf) return;
 	epReload(epn,ep,buf);
-}
-
-static void isrDMAINGO(int epn)
-{
-	usb_endpoint_t *ep=usb_get_ep(usbConfig,epn);
-	//usb_buffer_t buf;
-	
-	if (!ep) return;
 }
 
 void usb_isr(void)
@@ -370,7 +373,7 @@ void usb_isr(void)
 		if (src&1) { // go
 			src>>=1;
 			if (src<8) isrDMAOUTGO(src);
-			//else isrDMAINGO(src);
+			else isrDMAINGO(src);
 		} else {
 			src>>=1;
 			if (src<8) isrDMAOUTRLD(src);
@@ -578,17 +581,26 @@ int usb_get_state(void)
 
 void usb_set_state(int state)
 {
-	if (state==USB_STATE_SUSPENDED) usbSuspended=1;
-	else {
+	if (!usbSuspended&&(state==usbState)) return;
+	if (state==USB_STATE_SUSPENDED) {
+		if (usbSuspended) return;
+		usbSuspended=1;
+	} else {
 		usbSuspended=0;
 		usbState=state;
 	}
+	if (stateChangeCallback) stateChangeCallback(state);
 }
 
 void usb_set_state_unsuspend(void)
 {
 	if (usbSuspended) return;
 	usbSuspended=0;
+}
+
+void usb_set_state_cb(usb_cb_state cb)
+{
+	stateChangeCallback=cb;
 }
 
 void usb_set_address(u8 adr)
@@ -701,13 +713,17 @@ void usb_init(void)
 	usbAddress=0;
 	locklevel=0;
 	sofCB=preSOFCB=0;
-	ctlCallback=usb_ctl_std;
+	stdCtlCallback=usb_ctl_std;
+	classCtlCallback=vendorCtlCallback=0;
+	stateChangeCallback=0;
 
 	// ### TODO: need to do this for all configurations
 	for (i=0;i<16;++i) {
 		ep=usb_get_ep(1,i);
 		if (!ep) continue;
 		ep->data->go=0;
+		ep->data->goBusy=0;
+		ep->data->reloadBusy=0;
 		ep->data->reload=0;
 		ep->data->cb.o=0;
 	}

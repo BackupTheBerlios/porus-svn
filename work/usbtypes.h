@@ -92,6 +92,14 @@ This state is assigned by usb_init() and usb_disconnect().
 #define USB_CTL_PHASE_STATUS 3
 //@}
 
+#define USB_RCPT_DEV 0
+#define USB_RCPT_IFACE 1
+#define USB_RCPT_EP 2
+
+#define USB_CTL_TYPE_STD 0
+#define USB_CTL_TYPE_CLASS 1
+#define USB_CTL_TYPE_VENDOR 2
+
 //! USB data packet
 typedef usb_data_t *usb_buffer_t;
 
@@ -252,7 +260,7 @@ typedef struct usb_setup_t {
 	//! Data pointer
 	/*! Points to data received, or to data to be transmitted.
 	
-	During a write transaction with a data phase, it points to an 
+	During a write transaction with a data phase, this points to an 
 	internal buffer containing the received data.  It may 
 	be zero if there is no data phase, but do not rely on this.
 	
@@ -297,13 +305,16 @@ endpoints.
 */
 typedef int (*usb_cb_ctl)(usb_setup_t *s);
 
+typedef void (*usb_cb_state)(int state);
+
 typedef struct usb_endpoint_data_t {
 	union {
 		usb_cb_out o;
 		usb_cb_in i;
 	} cb;
-	usb_buffer_t go;
-	int waiting;
+	unsigned int goBusy:1,
+		reloadBusy:1;
+	usb_data_t *go;
 	usb_buffer_t reload;
 } usb_endpoint_data_t;
 

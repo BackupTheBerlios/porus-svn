@@ -10,10 +10,6 @@
 #define USB_DESC_OTHER_SPEED_CONFIGURATION 7
 #define USB_DESC_INTERFACE_POWER 8
 
-#define RCPT_DEV 0
-#define RCPT_IFACE 1
-#define RCPT_EP 2
-
 #define FEATURE_ENDPOINT_HALT 0
 #define FEATURE_DEVICE_REMOTE_WAKEUP 1
 #define FEATURE_TEST_MODE 2
@@ -55,7 +51,7 @@ static void reply_u16(usb_setup_t *setup, u16 data)
 static int usb_ctl_std_get_configuration(usb_setup_t *setup)
 {
 	if (!setup->dataDir) return -1;
-	if (setup->recipient!=RCPT_DEV) return -1;
+	if (setup->recipient!=USB_RCPT_DEV) return -1;
 	if (setup->len!=1) return -1;
 	if (usb_get_state()==USB_STATE_ADDRESS) {
 		reply_u8(setup,0);
@@ -84,19 +80,19 @@ static int usb_ctl_std_get_status(usb_setup_t *setup)
 	if (setup->len!=2) return -1;
 
 	switch(setup->recipient) {
-	case RCPT_DEV:
+	case USB_RCPT_DEV:
 		//### FIX ME!!
 		//data=flags.enableRemoteWakeup?0x200:0;
 		//data|=flags.selfPowered?0x100:0;
 		data=0x100;
 		reply_u16(setup,data);
 		break;
-	case RCPT_IFACE:
+	case USB_RCPT_IFACE:
 		if (usb_get_state()!=USB_STATE_CONFIGURED) return -1;
 		if (!usb_have_iface(1,setup->index)) return -1;
 		reply_u16(setup,0);
 		break;
-	case RCPT_EP:
+	case USB_RCPT_EP:
 		if (usb_get_state()==USB_STATE_ADDRESS)
 			if (setup->index!=0) return -1;
 		epn=setup->index;
@@ -119,7 +115,7 @@ static int usb_ctl_std_clear_feature(usb_setup_t *setup)
 	
 	switch(setup->value) {
 	case FEATURE_ENDPOINT_HALT:
-		if (setup->recipient!=RCPT_EP) return -1;
+		if (setup->recipient!=USB_RCPT_EP) return -1;
 		epn=setup->index;
 		if (epn&0x80) epn=(epn&15)+8;
 		if (usb_stall(epn))
@@ -127,7 +123,7 @@ static int usb_ctl_std_clear_feature(usb_setup_t *setup)
 		break;
 	case FEATURE_DEVICE_REMOTE_WAKEUP:
 		if (!(usb_config_features(1)&2)) return -1;
-		if (setup->recipient!=RCPT_DEV) return -1;
+		if (setup->recipient!=USB_RCPT_DEV) return -1;
 		//usb_enable_remote_wakeup(1);
 		break;
 	default:
@@ -144,7 +140,7 @@ static int usb_ctl_std_set_feature(usb_setup_t *setup)
 
 	switch(setup->value) {
 	case FEATURE_ENDPOINT_HALT:
-		if (setup->recipient!=RCPT_EP) return -1;
+		if (setup->recipient!=USB_RCPT_EP) return -1;
 		epn=setup->index;
 		if (epn&0x80) epn=(epn&15)+8;
 		if (usb_unstall(epn))
@@ -152,7 +148,7 @@ static int usb_ctl_std_set_feature(usb_setup_t *setup)
 		break;
 	case FEATURE_DEVICE_REMOTE_WAKEUP:
 		if (!(usb_config_features(1)&2)) return -1;
-		if (setup->recipient!=RCPT_DEV) return -1;
+		if (setup->recipient!=USB_RCPT_DEV) return -1;
 		//usb_enable_remote_wakeup(0);
 		break;
 	default:
@@ -181,7 +177,7 @@ static int usb_ctl_std_get_interface(usb_setup_t *setup)
 {
 	if (!setup->dataDir) return -1;
 	if (setup->value) return -1;
-	if (setup->recipient!=RCPT_IFACE) return -1;
+	if (setup->recipient!=USB_RCPT_IFACE) return -1;
 	if (setup->len!=1) return -1;
 	if (usb_get_state()!=USB_STATE_CONFIGURED) return -1;
 	reply_u8(setup,1); //### change this for alt setting support
@@ -194,7 +190,7 @@ static int usb_ctl_std_get_descriptor(usb_setup_t *setup)
 	usb_data_t *buf;
 
 	if (!setup->dataDir) return -1;
-	if (setup->recipient!=RCPT_DEV) return -1;
+	if (setup->recipient!=USB_RCPT_DEV) return -1;
 	switch((setup->value>>8)&0xff) {
 	case USB_DESC_DEVICE:
 		if (setup->index) return -1;

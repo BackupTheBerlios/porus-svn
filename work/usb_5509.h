@@ -2,7 +2,7 @@
 #ifndef GUARD_usb_5509_h
 #define GUARD_usb_5509_h
 
-#include "usbcfg.h"
+#include "ads1271evm_mmb0cfg.h"
 
 #define USB_BASE 		0x5800
 
