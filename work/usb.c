@@ -339,8 +339,8 @@ static void nextDMAIN(u8 epn, usb_endpoint_t *ep, int rld)
 			len=0;
 		} else
 			return;
-	}
-	ep->data->bulkInProgress=1;
+	} else
+		ep->data->bulkInProgress=1;
 	ep->data->lastlen=len;
 	/*
 	if (rld)
@@ -422,8 +422,8 @@ void usb_isr(void)
 	
 	if (!src) return;
 	if (src>=0x4f) return;
-	usb_lock();
-	HWI_enable();
+	//usb_lock();
+	//HWI_enable();
 	if (src<0x12) { // bus interrupts
 		switch(src) {
 		case 2: // OUT0
@@ -454,12 +454,12 @@ void usb_isr(void)
 			preSOFCB();
 			break;
 		default: // spurious / unknown ..
-			usb_unlock();
+			//usb_unlock();
 			return;
 		}
 	} else if (src<0x2E) { // endpoint interrupt
 		if (src&1) { // spurious
-			usb_unlock();
+			//usb_unlock();
 			return;
 		}
 		src=(src-0x10)>>1; // src is now the endpoint number
@@ -467,7 +467,7 @@ void usb_isr(void)
 		else isrOUT(src);
 	} else if (src<0x4f) { // dma
 		if (src<0x32) {
-			usb_unlock();
+			//usb_unlock();
 			return; // spurious
 		}
 		src-=0x30;
@@ -484,7 +484,7 @@ void usb_isr(void)
 			else isrDMAIN(src,1);
 		}
 	}
-	usb_unlock();
+	//usb_unlock();
 }
 
 void usb_set_sof_cb(usb_cb_sof cb)
