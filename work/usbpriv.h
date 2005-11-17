@@ -4,21 +4,20 @@
 
 #include "usb.h"
 
-typedef struct usb_packet_req_t {
-	unsigned int done:1, // 0 = request waiting, 1 = request complete
-		timeout:1; // 0 = no timeout, 1 = timeout occured
-	usb_endpoint_t *ep; // ptr to endpoint
-	usb_data_t *data; // ptr to buffer
-	u16 reqlen; // requested length in bytes
-	u16 actlen; // actual length in bytes
-} usb_packet_req_t;
+/*! \addtogroup grp_private
+@{
+*/
 
-//! Called when data copy is done
-void usb_evt_txdone(usb_endpoint_t *ep, u16 actlen);
-//! Called when OUT is done
-void usb_evt_rxdone(usb_endpoint_t *ep);
+//! Called when a packet copy is complete
+/*! This function is called by the hardware layer when the data for a received packet request has been copied into user memory, or when user memory has been copied to USB.  It may be called as a result of a copy completing, or as a result of a DMA interrupt.
+
+May be called under interrupt, especially on DMA systems.
+*/
+void usb_evt_cpdone(usb_endpoint_t *ep);
+
 //! Called if IN is not received in time
 void usb_evt_txtimeout(usb_endpoint_t *ep);
+
 //! Called if OUT is not received in time
 void usb_evt_rxtimeout(usb_endpoint_t *ep);
 
@@ -40,6 +39,15 @@ void usb_evt_ctl_rxdone(void);
 //! Called when a control IN finishes
 void usb_evt_ctl_txdone(void);
 
+//! Called to change an endpoint's state
+/*! Call this when an endpoint's status changes.  This calls the endpoint callbacks if necessary and updates the endpoint data structure.
+
+\p stat is not checked, so be careful to pass only valid state constants.
+
+\sa grp_epstat
+*/
+void usb_set_epstat(usb_endpoint_t *ep, int stat);
+
 void usb_set_state(int state);
 int usb_get_state(void);
 void usb_set_address(u8 adr);
@@ -49,5 +57,7 @@ int usb_get_config(void);
 int usb_ctl_state(void);
 
 void usb_ctl_init(void);
+
+//@}
 
 #endif

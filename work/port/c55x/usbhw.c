@@ -4,10 +4,19 @@
 #include <c55.h>
 #include <usb_5509.h>
 #include <mem.h>
-#include <ads1271evm_mmb0cfg.h>
+#include <pgactlcfg.h>
 #include <gbl.h>
 
 #define pkt_from_pkt(P) ((usb_packet_req_t *)((P)->ep->data->hwdata))
+
+typedef struct usb_packet_req_t {
+	unsigned int done:1, // 0 = request waiting, 1 = request complete
+		timeout:1; // 0 = no timeout, 1 = timeout occured
+	usb_endpoint_t *ep; // ptr to endpoint
+	usb_data_t *data; // ptr to buffer
+	u16 reqlen; // requested length in bytes
+	u16 actlen; // actual length in bytes
+} usb_packet_req_t;
 
 void usbhw_int_dis(void)
 {
@@ -190,7 +199,6 @@ static void epReload(int epn, usb_endpoint_t *ep, usb_data_t *data, u16 len)
 	USBODCTL(epn)|=USBODCTL_RLD;
 }
 
-// ### FIXME: make isrOUT work again
 static void isrOUT(int epn)
 {
 	usb_endpoint_t *ep;
@@ -224,19 +232,7 @@ void usbhw_cancel(usb_endpoint_t *ep)
 	USBICTY(epn)|=USBICTY_NAK;
 }
 
-static void isrDMAIN(u8 epn, int rld)
-{
-	usb_endpoint_t *ep;
-	usb_packet_req_t *txpkt;
-
-	ep=usb_get_ep(usb_get_config(),epn);
-	if (!ep) return;
-	txpkt=(usb_packet_req_t *)(ep->data->hwdata);
-	txpkt->done=1;
-	txpkt->actlen=txpkt->reqlen;
-	usb_evt_txdone(ep,txpkt->actlen);
-}
-
+// works for out and in both
 static void dmaGo(int epn, u32 data, u16 len)
 {
 	if (epn>15) epn-=8;
@@ -249,30 +245,40 @@ static void dmaGo(int epn, u32 data, u16 len)
 	USBODCTL(epn)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END;
 }
 
-int usbhw_tx(usb_packet_req_t *pkt)
-{
-	usb_packet_req_t *txpkt=(usb_packet_req_t *)(pkt->ep->data->hwdata);
-
-	if (!txpkt->done) return -1;
-	txpkt->ep=pkt->ep;
-	txpkt->data=pkt->data;
-	txpkt->reqlen=pkt->reqlen;
-	txpkt->actlen=0;
-	dmaGo(pkt->ep->id,(u32)(txpkt->data)<<1,txpkt->reqlen);
-	return 0;
+#define RXTX {\
+	usb_packet_req_t *pkt=(usb_packet_req_t *)(pkt->ep->data->hwdata);\
+\
+	if (!pkt->done) return -1;\
+	pkt->ep=ep;\
+	pkt->data=data;\
+	pkt->reqlen=len;\
+	pkt->actlen=0;\
+	pkt->done=0;\
+	dmaGo(ep->id,(u32)(data)<<1,len);\
+	return 0;\
 }
 
-static void isrIN(int epn)
+int usbhw_tx(usb_endpoint_t *ep, usb_data_t *data, u16 len)
+RXTX
+
+int usbhw_rx(usb_endpoint_t *ep, usb_data_t *data, u16 len)
+RXTX
+
+#undef RXTX
+
+static void isrDMA(int epn, int rld)
 {
 	usb_endpoint_t *ep;
-	usb_packet_req_t *txpkt;
+	usb_packet_req_t *pkt;
 
 	ep=usb_get_ep(usb_get_config(),epn);
 	if (!ep) return;
-	txpkt=(usb_packet_req_t *)(ep->data->hwdata);
-	txpkt->done=1;
-	txpkt->actlen=txpkt->reqlen;
-	usb_evt_txdone(ep,txpkt->actlen);
+	pkt=(usb_packet_req_t *)(ep->data->hwdata);
+	pkt->done=1;
+	//txpkt->actlen=txpkt->reqlen;
+	if (epn>15) epn-=8;
+	ep->actlen+=USBODCT(epn);
+	usb_evt_cpdone(ep);
 }
 
 void usbhw_isr(void)
@@ -316,17 +322,18 @@ void usbhw_isr(void)
 			//usb_unlock();
 			return;
 		}
+	} 
 #if 0
-	} else if (src<0x2E) { // endpoint interrupt
+	else if (src<0x2E) { // endpoint interrupt
 		if (src&1) { // spurious
 			//usb_unlock();
 			return;
 		}
 		src=(src-0x10)>>1; // src is now the endpoint number
-		if (src&8) isrIN(src+8);
-		//else isrOUT(src);
-#else
-	} else if (src>=0x32&&src<0x4f) { // dma
+		if (!(src&8)) isrOUT(src); // no tx interrupt
+	} else 
+#endif
+	if (src>=0x32&&src<0x4f) { // dma
 		//if (src<0x32) {
 			//usb_unlock();
 		//	return; // spurious
@@ -334,15 +341,17 @@ void usbhw_isr(void)
 		src-=0x30;
 		if (src&1) { // go
 			src>>=1;
-			// FIXME: make OUT DMA work again
-			if (src<8) { ; //isrDMAOUT(src,0);
-			}
-			else isrDMAIN(src+8,0);
-		} else { // reload
+			if (src<8)
+				isrDMA(src,0);
+			else
+				isrDMA(src+16,0);
+		}
+#if 0
+		else { // reload
 			src>>=1;
 			if (src<8) { ; //isrDMAOUT(src,1);
 			}
-			else isrDMAIN(src+8,1);
+			else isrDMA(src+8,1);
 		}
 #endif
 	}

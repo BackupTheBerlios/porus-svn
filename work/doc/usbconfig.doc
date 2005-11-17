@@ -1,53 +1,47 @@
 
-/* :mode=c: */
+// :mode=c:wrap=soft:
 
-//! \addtogroup pub_ctl
-//@{
-
-/*! \def USB_CTL_PACKET_SIZE
-\brief Size of a control data packet
-
+//! Size of a control data packet
+/*!
 The maximum size, in bytes, of data packets in control transactions.
+
+\ingroup grp_public_control
 */
+#define USB_CTL_PACKET_SIZE
 
-/*! \def USB_CTL_WRITE_BUF_SIZE
-\brief Size of receive buffer for control transactions
-
+//! Size of receive buffer for control transactions
+/*!
 The length in bytes of the statically declared receive array used to 
 receive data from control transactions.
+
+\ingroup grp_public_control
 */
+#define USB_CTL_WRITE_BUF_SIZE
 
-//@}
-
-//! \addtogroup pub_gen
-//@{
-
-/*! \def usb_mem_len(l)
-\brief Convert bytes to native USB buffer lengths
-
+//! Convert bytes to native USB buffer lengths
+/*!
 This macro converts a length in bytes to a length in either bytes, words, or longwords, depending on the unit used for the \c usb_data_t array.  Provided for portability; the common code of PORUS uses it frequently.
 
 \param l Length in bytes
 \return Length in native \c usb_data_t units
+
+\ingroup grp_public_support
 */
+#define usb_mem_len(l)
 
-//@}
-
-//! \addtogroup pub_ctl
-//@{
-
-/*! \fn void usb_get_device_desc(usb_data_t **bytes, int *len);
-\brief Get device descriptor
-
+//! Get device descriptor
+/*!
 Retrieves a pointer to the device descriptor, given as a \c usb_data_t array.  The length is placed in \p len .
 
 \param[out] bytes Pointer to a pointer, which is set to point to the descriptor.  Note that this may be located in ROM.
 \param[out] len Set to the descriptor's length.
+
+\ingroup grp_public_config
 */
+void usb_get_device_desc(usb_data_t **bytes, int *len);
 
-/*! \fn int usb_get_config_desc(unsigned int index, usb_data_t **bytes, int *len);
-\brief Get configuration descriptor
-
+//! Get configuration descriptor
+/*!
 Retrieves a pointer to the descriptor for the configuration numbered \p index.  Its length is placed in \p len .
 
 \param[in] index Configuration number to retrieve.
@@ -55,32 +49,37 @@ Retrieves a pointer to the descriptor for the configuration numbered \p index.  
 \param[out] len Set to the descriptor's length.
 \retval 0 No error
 \retval -1 No such configuration
+
+\ingroup grp_public_config
 */
+int usb_get_config_desc(unsigned int index, usb_data_t **bytes, int *len);
 
-/*! \fn usb_endpoint_t *usb_get_ep(unsigned int config, unsigned int ep)
-\brief Get endpoint structure
-
+//! Get endpoint structure
+/*!
 Returns the endpoint structure identified by \p config and \p ep, or 0 if none such exists.
 
 \param[in] config Number of the configuration containing the endpoint
 \param[in] ep Endpoint number
 \return Pointer to the endpoint structure, or 0 if none found
+
+\ingroup grp_public_support
 */
+usb_endpoint_t *usb_get_ep(unsigned int config, unsigned int ep);
 
+//! See whether configuration exists
 /*! \ingroup pub_gen pub_ctl
-\fn int usb_have_config(unsigned int config)
-\brief See whether configuration exists
-
 Returns non-zero if the configuration numbered \p config exists, 0 otherwise.
 
 \param[in] config Configuration number
 \retval 0 Configuration does not exist
 \retval 1 Configuration exists
+
+\ingroup grp_public_config
 */
+int usb_have_config(unsigned int config);
 
-/*! \fn int usb_config_features(unsigned int config)
-\brief Get configuration features
-
+//! Get configuration features
+/*!
 Returns a bitmap describing certain features of the given configuration.  The bits are (currently):
 
 - Bit 0: 1 if self-powered, 0 if not
@@ -90,11 +89,13 @@ Returns -1 if the configuration does not exist.
 
 \param[in] config Configuration number
 \return Features bitmap, or -1 if configuration does not exist
+
+\ingroup grp_public_config
 */
+int usb_config_features(unsigned int config);
 
-/*! \fn void usb_set_serial_number(usb_data_t *bytes);
-\brief Set serial number
-
+//! Set serial number
+/*!
 Sets the device's serial number descriptor to the given USB string descriptor.
 
 The string descriptor format must be that given in the USB standard, section 9.6.7.  The format begins with a single byte giving the length of the descriptor in bytes, including the length byte.  Next is a byte giving the descriptor type, which in this case must be 3.  This is followed by the Unicode string giving the serial number.  Characters are 16-bit and must be given in little-endian byte order; i.e., the LSB must be in the upper position on 16-bit systems.
@@ -102,6 +103,84 @@ The string descriptor format must be that given in the USB standard, section 9.6
 The configuration file must contain a line setting the serial number; if it does not have one, this function is not generated and is not available.
 
 \param[in] bytes Serial number descriptor.
-*/
 
-//@}
+\ingroup grp_public_config
+*/
+void usb_set_serial_number(usb_data_t *bytes);
+
+//! Calculate words needed to contain USB bytes
+/*! This function calculates the number of machine words needed to contain 
+\a l packed bytes.
+
+On machines with octet-addressable memory, this returns \a l.  On machines 
+with word and long-word-addressable memory, this calculates the number of 
+complete words needed to contain \a l bytes after packing.
+
+This function is typically implemented as a macro, and is generated by 
+usbgen for the target machine.  It is defined in usbconfig.h.
+
+\ingroup grp_public_support
+*/
+size_t usb_mem_len(int l);
+
+//! Size of a buffer length
+/*!
+This is the number of words which a buffer length variable occupies.  Mainly used internally.
+
+This is generated by usbgen for the target machine, and is defined in usbconfig.h.
+
+\ingroup grp_public_support
+*/
+#define USB_BUF_LEN_SIZE
+
+//! Maximum length of a control packet
+/*!
+Maximum length of a control packet, in bytes.
+
+This is generated by usbgen for the target machine, and is defined in usbconfig.h.
+
+\ingroup grp_public_control
+*/
+#define USB_CTL_PACKET_SIZE
+
+//! Number of bytes stored in a USB buffer
+/*! Given a buffer \a buf, returns the number of bytes currently stored in it.  (This is \e not the maximum or allocated length of the buffer.)
+
+\note \a len is always in bytes, regardless of memory width.
+
+This function is typically implemented as a macro, and is generated by 
+usbgen for the target machine.  It is defined in usbconfig.h.
+
+\sa usb_buf_set_len()
+\ingroup grp_public_support
+*/
+unsigned short usb_buf_len(usb_buffer_t buf);
+
+//! Set the length field of a USB buffer
+/*!
+Given a buffer \a buf, sets its length field to \a len.  The length field 
+represents the number of bytes stored in the field.
+
+\note \a len is always in bytes, regardless of memory width.
+
+\param len Length field in bytes.
+
+This function is typically implemented as a macro, and is generated by 
+usbgen for the target machine.  It is defined in usbconfig.h.
+
+\sa usb_buf_len()
+\ingroup grp_public_support
+*/
+void usb_buf_set_len(usb_buffer_t buf, unsigned short len);
+
+//! Retrieve data pointer for a USB buffer
+/*!
+Returns a pointer to the beginning of the data field of a USB buffer.
+
+The word format of a USB buffer is system dependent; the data type is 
+usb_data_t.
+
+\ingroup grp_public_support
+*/
+usb_data_t *usb_buf_data(usb_buffer_t buf);
+

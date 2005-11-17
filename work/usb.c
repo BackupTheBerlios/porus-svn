@@ -8,8 +8,8 @@ static volatile struct {
 	u8 config;
 } flags;
 
-static usb_cb sofCB, preSOFCB;
-static usb_cb_int stateChangeCallback;
+static usb_cb_sof sofCB, preSOFCB;
+static usb_cb_state stateChangeCallback;
 
 void usb_cancel(u8 epn)
 {
@@ -17,9 +17,30 @@ void usb_cancel(u8 epn)
 
 	if (!ep) return;
 	usbhw_cancel(ep);
-	ep->data->xferInProgress=0;
+	usb_set_epstat(USB_EPSTAT_IDLE);
+	//ep->data->xferInProgress=0;
 }
 
+int usb_move(u8 epn, usb_data_t *data, u32 len)
+{
+	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
+
+	if (!ep) return -1;
+	if (len&&!data) return -2;
+
+	if (ep->data->epstat!=USB_EPSTAT_IDLE) return -3;
+	usb_set_epstat(ep,USB_EPSTAT_XFER);
+	//ep->data->xferInProgress=1;
+	ep->data->buf=data;
+	ep->data->reqlen=len;
+	ep->data->actlen=0;
+	//usbhw_int_dis_txdone(epn);
+	usb_evt_cpdone(ep,0);
+	//usbhw_int_en_txdone(epn);
+	return 0;
+}
+
+#if 0
 int usb_tx(u8 epn, usb_data_t *data, u32 len)
 {
 	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
@@ -27,26 +48,31 @@ int usb_tx(u8 epn, usb_data_t *data, u32 len)
 	if (!ep) return -1;
 	if (len&&!data) return -2;
 
-	if (ep->data->xferInProgress) return -3;
-	ep->data->xferInProgress=1;
+	if (ep->data->epstat!=USB_EPSTAT_IDLE) return -3;
+	usb_set_epstat(ep,USB_EPSTAT_XFER);
+	//ep->data->xferInProgress=1;
 	ep->data->buf=data;
 	ep->data->reqlen=len;
 	ep->data->actlen=0;
 	usbhw_int_dis_txdone(epn);
-	usb_evt_txdone(ep,0);
+	usb_evt_cpdone(ep,0);
 	usbhw_int_en_txdone(epn);
 	return 0;
 }
+#endif
 
-void usb_evt_txdone(usb_endpoint_t *ep, u16 actlen)
+#if 0
+void usb_evt_cpdone(usb_endpoint_t *ep, u16 actlen)
 {
 	usb_packet_req_t pkt;
 	u32 l;
 
-	if (!ep->data->xferInProgress) return;
+	//if (!ep->data->xferInProgress) return;
+	if (ep->data->epstat!=USB_EPSTAT_XFER) return;
 	ep->data->actlen+=actlen;
 	if (ep->data->actlen>=ep->data->reqlen) {
-		ep->data->xferInProgress=0;
+		usb_set_epstat(USB_EPSTAT_IDLE);
+		//ep->data->xferInProgress=0;
 		if (actlen<64) {
 			return;
 		} else {
@@ -60,13 +86,40 @@ void usb_evt_txdone(usb_endpoint_t *ep, u16 actlen)
 		pkt.data=ep->data->buf+usb_mem_len(ep->data->actlen);
 	}
 	pkt.ep=ep;
-	usbhw_tx(&pkt);
+	if (ep->id&16)
+		usbhw_tx(&pkt);
+	else
+		usbhw_rx(&pkt);
+	//ep->data->actlen+=l;
+}
+#endif
+
+void usb_evt_cpdone(usb_endpoint_t *ep)
+{
+	usb_packet_req_t pkt;
+	u32 l;
+
+	//if (!ep->data->xferInProgress) return;
+	if (ep->data->epstat!=USB_EPSTAT_XFER) return;
+	ep->data->actlen+=actlen;
+	if (ep->data->actlen>=ep->data->reqlen) {
+		usb_set_epstat(USB_EPSTAT_IDLE);
+		return;
+	}
+	l=ep->data->reqlen-ep->data->actlen;
+	if (l>ep->packetSize)
+		l=ep->packetSize;
+	pkt.reqlen=l;
+	pkt.data=ep->data->buf+usb_mem_len(ep->data->actlen);
+	pkt.ep=ep;
+	if (ep->id&16)
+		usbhw_tx(&pkt);
+	else
+		usbhw_rx(&pkt);
 	//ep->data->actlen+=l;
 }
 
-// ### FIXME: make receive work
-
-void usb_set_sof_cb(usb_cb cb)
+void usb_set_sof_cb(usb_cb_sof cb)
 {
 	if (!cb) {
 		usbhw_int_dis_sof();
@@ -77,7 +130,7 @@ void usb_set_sof_cb(usb_cb cb)
 	}
 }
 
-void usb_set_presof_cb(usb_cb cb)
+void usb_set_presof_cb(usb_cb_sof cb)
 {
 	if (!cb) {
 		usbhw_int_dis_presof();
@@ -105,6 +158,7 @@ int usb_stall(u8 epn)
 	if (epn>31) return -1;
 	if (!(epn&15)) return -1;
 	usbhw_stall(epn);
+	usb_set_epstat(USB_EPSTAT_STALLED);
 	return 0;
 }
 
@@ -113,6 +167,7 @@ int usb_unstall(u8 epn)
 	if (epn>31) return -1;
 	if (!(epn&15)) return -1;
 	usbhw_unstall(epn);
+	usb_set_epstat(USB_EPSTAT_IDLE);
 	return 0;
 }
 
@@ -210,16 +265,13 @@ void usb_evt_reset(void)
 	// sof & presof interrupts only set if we have callbacks
 	if (sofCB) usbhw_int_en_sof();
 	if (preSOFCB) usbhw_int_en_presof();
-
-	/* note: since we use FRSTE=1 we know the USB module is already (mostly) 
-	at power-up values, so we don't need to reset addresses etc etc */
 }
 
 void usb_evt_suspend(void)
 {
 	usb_set_state(USB_STATE_SUSPENDED);
 }
-
+                                               
 void usb_evt_resume(void)
 {
 	if (!flags.suspended) return;
@@ -227,11 +279,47 @@ void usb_evt_resume(void)
 	if (stateChangeCallback) stateChangeCallback(flags.state);
 }
 
-void usb_set_state_cb(usb_cb_int cb)
+void usb_set_state_cb(usb_cb_state cb)
 {
 	stateChangeCallback=cb;
 }
 
+void usb_set_epstat(usb_endpoint_t *ep, int stat)
+{
+	if (!ep) return;
+
+	if (ep->data->stat==USB_EPSTAT_XFER&&stat==USB_EPSTAT_IDLE) {
+		if (ep->data->done_cb) ep->data->done_cb(ep->id);
+	ep->data->stat=stat;
+	if (ep->data->epstat_cb) ep->data->epstat_cb(ep->id,stat);
+}
+
+int usb_get_epstat(int epn)
+{
+	usb_endpoint_t *ep;
+	
+	if (!(epn&15)) return -1;
+	ep=usb_get_ep(flags.config,epn);
+
+	if (!ep) return USB_EPSTAT_UNUSED;
+	return ep->data->epstat;
+}
+
+void usb_set_epstat_cb(int epn, usb_cb_epstat cb)
+{
+	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
+	
+	if (!ep) return;
+	ep->data->epstat_cb=cb;
+}
+
+void usb_set_epstat_cb(int epn, usb_cb_done cb)
+{
+	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
+	
+	if (!ep) return;
+	ep->data->done_cb=cb;
+}
 
 #if 0
 /* codes: -1: no such OUT ep */
@@ -279,7 +367,7 @@ void usb_set_txdone_cb(int epn, usb_cb_done cb)
 	usb_endpoint_t *ep=usb_get_ep(flags.config,epn);
 
 	if (!ep) return;
-	if (epn<9) return;
+	if (epn<15) return;
 	//ep->data->doneCallback=cb;
 }
 #endif
@@ -331,7 +419,8 @@ void usb_init(void *param)
 		//ep->data->reload=0;
 		if (i>15) {
 			//ep->data->cb.i=usb_bulk_in;
-			ep->data->xferInProgress=0;
+			//ep->data->xferInProgress=0;
+			usb_set_epstat(ep,USB_EPSTAT_IDLE);
 			//ep->data->stop=0;
 			ep->data->buf=0;
 			//ep->data->buflen=0;
