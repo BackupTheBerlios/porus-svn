@@ -47,14 +47,14 @@ static volatile struct {
 static void reply_u8(u8 data)
 {
 	txbuf[0]=data<<8;
-	usb_ctl_read_end(0,1,txbuf);
+	usb_ctl_read_end(1,txbuf);
 }
 
 static void reply_u16(u16 data)
 {
 	txbuf[0]=(data&0xff)<<8;
 	txbuf[0]|=(data>>8)&0xff;
-	usb_ctl_read_end(0,2,txbuf);
+	usb_ctl_read_end(2,txbuf);
 }
 
 static int usb_ctl_std_get_configuration(void)
@@ -100,7 +100,7 @@ static int usb_ctl_std_get_status(void)
 			if (usb_setup.index!=0) return -1;
 		epn=usb_setup.index;
 		if (epn&0x80) epn=(epn&15)+8;
-		ret=usb_is_stalled(epn);
+		ret=usb_is_stalled(usb_get_ep(usb_get_config(),epn));
 		if (ret<0) return -1;
 		reply_u16(ret==1?0x100:0);
 		break;
@@ -119,7 +119,7 @@ static int usb_ctl_std_clear_feature(void)
 		if (usb_setup.recipient!=USB_RCPT_EP) return -1;
 		epn=usb_setup.index;
 		if (epn&0x80) epn=(epn&15)+8;
-		if (usb_unstall(epn))
+		if (usb_unstall(usb_get_ep(usb_get_config(),epn)))
 			return -1;
 		break;
 	case FEATURE_DEVICE_REMOTE_WAKEUP:
@@ -142,7 +142,7 @@ static int usb_ctl_std_set_feature(void)
 		if (usb_setup.recipient!=USB_RCPT_EP) return -1;
 		epn=usb_setup.index;
 		if (epn&0x80) epn=(epn&15)+8;
-		if (usb_stall(epn))
+		if (usb_stall(usb_get_ep(usb_get_config(),epn)))
 			return -1;
 		break;
 	case FEATURE_DEVICE_REMOTE_WAKEUP:
@@ -204,7 +204,7 @@ static int usb_ctl_std_get_descriptor(void)
 	default:
 		return -1;
 	}
-	usb_ctl_read_end(0,desclen,buf);
+	usb_ctl_read_end(desclen,buf);
 	return 0;
 }
 
@@ -231,7 +231,7 @@ static void usb_ctl_std_read(void)
 		break;
 	}
 	if (err)
-		usb_ctl_read_end(1,0,0);
+		usb_ctl_stall();
 }
 
 static void usb_ctl_std_write(void)
@@ -258,9 +258,9 @@ static void usb_ctl_std_write(void)
 		break;
 	}
 	if (err)
-		usb_ctl_write_end(1);
+		usb_ctl_stall();
 	else
-		usb_ctl_write_end(0);
+		usb_ctl_write_end();
 }
 
 void usb_ctl_stall(void)
@@ -330,9 +330,9 @@ void usb_evt_ctl_tx(void)
 	}
 }
 
-void usb_ctl_read_end(int stat, int len, usb_data_t *data)
+void usb_ctl_read_end(int len, usb_data_t *data)
 {
-	if (ctlflags.state!=USB_CTL_STATE_RRS||!len||!data||stat) {
+	if (ctlflags.state!=USB_CTL_STATE_RRS||!len||!data) {
 		usb_ctl_stall();
 		return;
 	}
@@ -345,9 +345,9 @@ void usb_ctl_read_end(int stat, int len, usb_data_t *data)
 	usb_evt_ctl_tx();
 }
 
-void usb_ctl_write_end(int stat)
+void usb_ctl_write_end(void)
 {
-	if (ctlflags.state!=USB_CTL_STATE_RWD||stat) {
+	if (ctlflags.state!=USB_CTL_STATE_RWD) {
 		usb_ctl_stall();
 		return;
 	}

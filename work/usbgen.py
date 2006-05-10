@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-VERSION='0.4.0'
+VERSION='0.5.0a'
 
 import datetime,textwrap,logging,pprint
 
@@ -55,13 +55,13 @@ default_config={
 	'name':'',
 	'selfPowered':1,
 	'remoteWakeup':0,
-	'maxPower':0,
 	'interface':None
 	# assigned opts:
 	# numIfaces - number of interfaces
 	# value - used for bConfigurationValue; starts from 1
 	# descriptor - descriptor array, including iface & endpoint arrays
 	# features - number appearing in the features array in the code
+	# maxPower - default 500 only if selfPowered is true
 }
 
 default_iface={
@@ -80,14 +80,14 @@ default_ep={
 	'dir':None,
 	'number':None,
 	'type':'bulk',
-	'syncType':'none',
-	'usageType':'data',
 	'maxPacketSize':None,
 	'pollingInterval':1,
 	'sendTimeout':0
 	# assigned opts:
 	# descriptor - descriptor array
 	# symbol - symbolic name for structs etc.
+	# syncType - default 'none' only if iso
+	# usageType - default 'data' only if iso
 }
 
 strings=[]
@@ -267,6 +267,10 @@ def genEPArray(o):
     else:
 	error('%s: unknown transfer type %s'%(name,s))
     if s=='isochronous':
+	if not o.has_key('syncType'):
+	    o['syncType']='none'
+	if not o.has_key('usageType'):
+	    o['usageType']='data'
 	s=o['syncType']
 	if s=='none':
 	    pass
@@ -353,18 +357,22 @@ def genConfigArray(o):
     if checkBool(o['remoteWakeup']):
 	b|=0x20
     a+=[b]
-    if selfPowered and o.has_key('maxPower'):
-	mp=o['maxPower']
+    if not selfPowered:
+	if not o.has_key('maxPower'):
+	    mp=500
+	    warn('config %d: maxPower not set, but device is bus powered; using 500 mA'%o['value'])
+	else:
+	    mp=o['maxPower']
 	if mp>500:
 	    error('%s: maxPower too large: max is 500'%name)
 	if mp<0:
 	    error('%s: maxPower is negative!'%name)
 	if mp==0:
-	    warn('config %d: maxPower is zero, but device is self-powered'%o['value'])
-	a+=[o['maxPower']//2]
-    if not selfPowered:
+	    warn('config %d: maxPower is zero, but device is bus powered'%o['value'])
+	a+=[mp//2]
+    if selfPowered:
 	if o.has_key('maxPower'):
-	    warn("config %d: device is not self-powered; maxPower option ignored"%o['value'])
+	    warn("config %d: device is not bus powered; maxPower option ignored"%o['value'])
 	a+=[0]
     for iface in o['interface']:
 	a+=iface['descriptor']
@@ -543,6 +551,7 @@ int usb_get_string_desc(unsigned int index, unsigned short langid, usb_data_t **
 int usb_have_config(unsigned int config);
 int usb_have_iface(unsigned int config, unsigned int iface);
 usb_endpoint_t *usb_get_ep(unsigned int config, unsigned int ep);
+usb_endpoint_t *usb_get_first_ep(unsigned int config);
 /* bit 0: self powered; bit 1: remote wakeup */
 int usb_config_features(unsigned int config);"""%substs
     if sn:
@@ -551,7 +560,7 @@ int usb_config_features(unsigned int config);"""%substs
 #endif
 """
 
-def genEPStruct(opts):
+def genEPStruct(opts,nextlink):
     global ENDPOINT_TYPES
     number=opts['number']
     if not opts['type'] in ENDPOINT_TYPES:
@@ -565,7 +574,8 @@ def genEPStruct(opts):
     substs={'name':epname,'epid':number,'eptype':typ,
     	'pktsize':opts['maxPacketSize'],
 	'datastruct':datastruct,
-	'sendtimeout':opts['sendTimeout']}
+	'sendtimeout':opts['sendTimeout'],
+	'nextlink':nextlink}
     return """usb_endpoint_data_t %(datastruct)s;
 
 static const usb_endpoint_t %(name)s={
@@ -573,22 +583,26 @@ static const usb_endpoint_t %(name)s={
 	%(eptype)s,
 	%(pktsize)s,
 	&%(datastruct)s,
-	%(sendtimeout)s
+	%(sendtimeout)s,
+	(usb_endpoint_t *)(%(nextlink)s)
 };"""%substs
 
 def genEPConfigStructs(opts):
     cf=opts['config'][0]
     epStructs=[]
     epArray=['0']*32
+    nextlink='0'
     for iface in cf['interface']:
-	for ep in iface['endpoint']:
-	    epStructs.append(genEPStruct(ep))
+	for ep in reversed(iface['endpoint']):
+	    epStructs.append(genEPStruct(ep,nextlink))
 	    epn=ep['number']
 	    if ep['dir']=='in':
 		epn+=16
 	    epArray[epn]='&'+ep['symbol']
+	    nextlink='&'+ep['symbol']
     s='\n\n'.join(epStructs)
     s+='\n\n'+genPointerArray('endpoints',epArray,'static const usb_endpoint_t')
+    s+='\n\nstatic const usb_endpoint_t *first_endpoint='+nextlink+';'
     return s
 
 def genConfigDescs(opts):
@@ -699,6 +713,12 @@ usb_endpoint_t *usb_get_ep(unsigned int config, unsigned int ep)
 	if (!usb_have_config(config)) return 0;
 	if (ep>31) return 0;
 	return (usb_endpoint_t *)(endpoints[ep]);
+}
+
+usb_endpoint_t *usb_get_first_ep(unsigned int config)
+{
+	if (!usb_have_config(config)) return 0;
+	return (usb_endpoint_t *)first_endpoint;
 }
 
 int usb_have_config(unsigned int config)

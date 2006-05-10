@@ -4,7 +4,7 @@
 
 /* :wrap=soft: */
 #include "usbpriv.h"
-#include <portconf.h>
+//#include <portconf.h>
 
 /*! \ingroup grp_hw
 @{
@@ -109,26 +109,7 @@ Finally, the port must call usb_evt_cpdone().
 */
 int usbhw_tx(usb_endpoint_t *ep, usb_data_t *data, u16 len);
 
-//! Receive a single USB packet
-/*! Waits for an OUT transaction.  When it occurs, the request packet 
-is filled in and returns.
-
-This function makes the endpoint hardware ready for 
-an OUT transaction.  When the OUT transaction occurs, an ISR copies the 
-data to the request packet, possibly using DMA.  When the data has been 
-copied, or when the DMA transaction has finished, usb_evt_rxdone() is called.
-
-On some systems, two or more requests can be active at once.  If no 
-requests can be accepted, -1 is returned.  This function does not block 
-waiting for a request slot to become available, even on blocking 
-systems.
-
-\param[in] pkt Pointer to a packet request.
-\return Status code
-\retval 0 Success
-\retval -1 Request could not be accepted
-*/
-int usbhw_rx(usb_packet_req_t *pkt);
+int usbhw_rx(usb_endpoint_t *ep, usb_data_t *data, u16 len);
 
 //! Cancel any pending transaction
 /*! Attempts to cancel any transaction occurring on the given endpoint.
@@ -261,39 +242,35 @@ void usbhw_ctl_stall(void);
 */
 int usbhw_ctl_is_stalled(void);
 
-//! Do hardware setup for the given endpoint, and activate it
-/*! Activates the given endpoint.
+//! Activate endpoints in the given configuration
+/*! Activates the endpoints in the given configuration, preparing the hardware for each endpoint as necessary.
 
-Most USB peripherals have some means of activating and deactivating endpoints; an inactive endpoint does not respond to transactions.  Activating an endpoint typically requires the setting of various registers, and sometimes the allocation of memory.  These things should be done in this function.
+The routine should iterate through all possible endpoints, and activate those which usb_get_ep() reports as existing.
 
-The ep structure is filled in by the PORUS configuration system.  It should be used as necessary for setting up the endpoint's registers.
+If any of the endpoints cannot be activated, this routine should return -1.  If this happens, it is not necessary to deactivate the activated endpoints, if any; the core will call usbhw_deactivate_eps() if needed.
 
-This function is called at initialisation time for each endpoint that needs to be active.
+\param[in] cnf Configuration to activate
+\return 0 on success, or -1 on error
 
-\param ep Endpoint structure
-\retval 0 Successfully activated endpoint
-\retval -1 Could not activate the endpoint
-\sa usb_endpoint_t, usbhw_deactivate_ep()
+\sa usbhw_deactivate_eps()
 */
-int usbhw_activate_ep(usb_endpoint_t *ep);
+int usbhw_activate_eps(int cnf);
 
-//! Deactivate the given endpoint
-/*! Deactivates the hardware for the endpoint.
+//! Deactivate all endpoints
+/*! Deactivates the endpoints in the given configuration (or all endpoints); i.e., shuts down the hardware for the endpoints so that they will not respond to transactions.
 
-Following this function, the endpoint should be inactive; i.e., it should not respond to transactions at all.
+If the endpoints are already inactive, this routine should do nothing.  If only some of the endpoints are active, this routine should deactivate them.
 
-May be called in response to a bus reset or detachment.
+This routine should also free any private memory allocated on hwdata for the endpoints.
 
-If the endpoint doesn't exist or is already inactive, this function should do nothing.
-
-\param ep Endpoint structure
+\param[in] cnf Configuration to deactivate
 */
-void usbhw_deactivate_ep(usb_endpoint_t *ep);
+void usbhw_deactivate_eps(int cnf);
 
 //! Set the node address in hardware
 /*! Called by the standard control layer when it receives a SET_ADDRESS request.  This should set the node's hardware address.  This should be done immediately, so that the next received packet is checked against the given address.
 
-If this address is the same as the current address, nothing need be done.
+If this address is the same as the current address, nothing needs to be done.
 
 \param adr Hardware address to use
 */
@@ -428,5 +405,9 @@ The CTLOUT interrupt is triggered when a control packet is received.
 void usbhw_int_dis_ctlout(void);
 
 //@}
+
+usb_alarm_t *usbhw_mkalarm(void);
+int usbhw_sleep(usb_alarm_t *alarm, int timeout_ms);
+void usbhw_wake(usb_alarm_t *alarm);
 
 #endif

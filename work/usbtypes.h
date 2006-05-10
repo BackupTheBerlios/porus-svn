@@ -108,11 +108,11 @@ These define the various states in which an endpoint can be.
 */
 
 //! Unused endpoint
-/*! The endpoint is not defined or used.  This is the state assumed by a nonexistent endpoint. */
+/*! The endpoint is not defined or used. */
 #define USB_EPSTAT_UNUSED 0
 
 //! Endpoint is idle
-/*! The endpoint is idle, not stalled, and no transfers are taking place. */
+/*! The endpoint is idle, is not stalled, and no transfers are taking place. */
 #define USB_EPSTAT_IDLE 1
 
 //! Transfer in progress
@@ -120,12 +120,21 @@ These define the various states in which an endpoint can be.
 #define USB_EPSTAT_XFER 2
 
 //! Stalled
-/*! The endpoint is stalled. */
+/*! The endpoint is stalled.
+
+This status is never set on an endpoint; it is used with the done callback as a notification. */
 #define USB_EPSTAT_STALL 3
 
 //! Timed out
-/*! Endpoint timed out.  Reset with usb_clear_timeout(). */
+/*! Endpoint timed out.
+
+This status is never set on an endpoint; it is used with the done callback as a notification. */
 #define USB_EPSTAT_TIMEOUT 4
+
+//! Inactive
+/*! Endpoint is not activated.  Endpoints begin in this state; they are 
+activated when the USB hardware turns on, and then they enter IDLE. */
+#define USB_EPSTAT_INACTIVE 5
 
 //!@}
 
@@ -297,27 +306,26 @@ typedef struct usb_setup_t {
 	u16 len;
 } usb_setup_t;
 
-//! Receive callback
-/*!
-\param[in] ep Endpoint number.  Useful when multiple endpoints call the same callback.
-\param[out] buf Pointer to the packet that was just received, or 0.
-\return Pointer to a packet structure which is ready to receive data, or 0.
+typedef struct usb_endpoint_t usb_endpoint_t;
+typedef struct usb_alarm_t usb_alarm_t;
 
+//! Transaction complete callback
+/*! Optionally called when a transaction completes, when passed to usb_move().
+
+\p ptr is a pointer chosen by the user, which can be used (for example) to identify the transaction.  \p stat reports the status of the transfer and can be one of the following:
+
+ - \a 0 Transfer completed, no problems
+ - \a -1 Timeout occured; transfer did not complete
+
+This may be called at interrupt time, so it should execute quickly.
+
+\param[in] ptr User pointer
+\param[in] stat Status code
+
+\sa usb_move()
 \ingroup grp_public_io
 */
-//typedef usb_buffer_t (*usb_cb_out)(int epn, usb_buffer_t buf);
-
-//! Transmit callback
-/*!
-\param[in] epn Endpoint number.  Useful when multiple endpoints call the same callback.
-\param[out] buf Pointer to the packet that was just transmitted, or 0.  A new transmit 
-	buffer is returned through this.
-\param[out] len Requested length is passed here.  Return the length of a new buffer through this.
-\return -1, indicating no data, or 0, indicating success.
-
-\ingroup grp_public_io
-*/
-//typedef int (*usb_cb_in)(int epn, u32 *buf, u16 *len);
+typedef void (*usb_cb_done)(void *ptr, int stat);
 
 //! SOF callback
 /*! Called when a SOF (start-of-frame) token is received.  This is called at 
@@ -336,33 +344,6 @@ This is set with usb_set_state_cb().
 \ingroup grp_public_support
 */
 typedef void (*usb_cb_state)(int state);
-
-//! Transaction complete callback
-/*! Called when a transaction completes.  Set with usb_set_done_cb().
-
-This may be called at interrupt time, so should be handled quickly.
-
-\sa usb_set_done_cb()
-\ingroup grp_public_io
-*/
-typedef void (*usb_cb_done)(int epn);
-
-//! Endpoint status callback
-/*! This callback is called when the state of an endpoint changes.  It can be used to detect the end (or beginning) of a transfer.
-
-If only end-of-transfer notification is needed, set a callback with usb_set_done_cb().
-
-This may be called at interrupt time, so should be handled quickly.
-
-The callback is set with usb_set_epstat_cb().
-
-\param[in] epn Endpoint number for which the status changed
-\param[in] epstat New status
-
-\sa usb_set_epstat_cb(), usb_set_done_cb(), grp_epstat
-\ingroup grp_public_support
-*/
-typedef void (*usb_cb_epstat)(int epn, int epstat);
 
 //! Total space occupied by a USB buffer
 /*! This macro evaluates to the total amount of space occupied by a 
@@ -406,14 +387,22 @@ Users of the external PORUS API never see this structure; it is used only by the
 
 \ingroup grp_private
 */
-typedef struct usb_endpoint_data_t {
+struct usb_endpoint_data_t {
 	//unsigned int xferInProgress:1;
 	//! Endpoint status
-	unsigned int stat:3;
+	unsigned int stat:3,
+		//! Timeout status
+		timed_out:1;
+	//! Time of last transaction; units port-dependent
+	u32 check_time;
+	//! Timeout in milliseconds; 0 = no timeout
+	u16 timeout;
 	//! Status callback
-	usb_cb_epstat epstat_cb;
+	//usb_cb_epstat epstat_cb;
 	//! Transaction complete callback
 	usb_cb_done done_cb;
+	//! Callback pointer
+	void *cb_ptr;
 	//! Pointer to data buffer
 	usb_data_t *buf;
 	//! Buffer length in bytes
@@ -422,7 +411,9 @@ typedef struct usb_endpoint_data_t {
 		actlen;
 	//! Generic pointer for port use
 	void *hwdata;
-} usb_endpoint_data_t;
+};
+
+typedef struct usb_endpoint_data_t usb_endpoint_data_t;
 
 //! Endpoint structure
 /*! Contains status and configuration information for one endpoint.  It has a constant part and a writable part, usb_endpoint_data_t.  The constant part is generated by the PORUS configuration program usbgen; the writable part is used in several places, and includes a variable which the port can use.
@@ -433,7 +424,7 @@ Users of the external PORUS API never see this structure; it is used only by the
 
 \ingroup grp_private
 */
-typedef struct usb_endpoint_t {
+struct usb_endpoint_t {
 	unsigned int
 		//! Endpoint number
 		/*! Endpoint number.  Range is 1-31, excepting 16, which is a control endpoint.
@@ -460,6 +451,8 @@ typedef struct usb_endpoint_t {
 	*/
 	usb_endpoint_data_t *data;
 	int in_timeout; // in frames
-} usb_endpoint_t;
+	//! Next endpoint structure, or 0
+	usb_endpoint_t *next;
+};
 
 #endif

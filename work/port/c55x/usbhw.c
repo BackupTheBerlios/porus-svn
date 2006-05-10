@@ -1,12 +1,39 @@
 
 #include "usbhw.h"
-#include <bios.h>
+#include <std.h>
 #include <c55.h>
 #include <usb_5509.h>
 #include <mem.h>
-#include <pgactlcfg.h>
-#include <gbl.h>
+#include <sem.h>
+#include <clk.h>
+#include <stdlib.h>
 
+//#include "libmmb0/ui.h"
+
+static u16 USBHW_DMA_LOGSIZE;
+volatile usbhw_dmalog_t *usbhw_dmalog;
+static int usbhw_dmalog_index=0;
+
+void usbhw_dmalog_write(u8 id, u8 epn)
+{
+	usbhw_dmalog_t l;
+
+	if (usbhw_dmalog_index>=USBHW_DMA_LOGSIZE)
+		return;
+	l.ep=epn;
+	if (epn>16) epn-=8;
+	l.nakx=(USBOCTX(epn)&USBOCTX_NAK)?1:0;
+	l.naky=(USBOCTY(epn)&USBOCTY_NAK)?1:0;
+	l.toggle=(USBICNF(epn)&USBICNF_TOGGLE)?1:0;
+	l.dmago=(USBODCTL(epn)&USBODCTL_GO)?1:0;
+	l.dmastp=(USBODCTL(epn)&USBODCTL_STP)?1:0;
+	l.dmaovf=(USBODCTL(epn)&USBODCTL_OVF)?1:0;
+	l.dmacount=USBODCT(epn);
+	l.id=id;
+	usbhw_dmalog[usbhw_dmalog_index++]=l;
+}
+
+#if 0
 #define pkt_from_pkt(P) ((usb_packet_req_t *)((P)->ep->data->hwdata))
 
 typedef struct usb_packet_req_t {
@@ -17,6 +44,93 @@ typedef struct usb_packet_req_t {
 	u16 reqlen; // requested length in bytes
 	u16 actlen; // actual length in bytes
 } usb_packet_req_t;
+#endif
+
+struct c55x_params params;
+
+static void *sys_malloc(u32 len)
+{
+	return MEM_alloc(0,len,0);
+}
+
+static void sys_free(void *mem)
+{
+	MEM_free(0,mem,0);
+}
+
+/* timeouts -------------------- */
+
+static void update_check_time(usb_endpoint_t *ep)
+{
+	ep->data->check_time=CLK_getltime();
+}
+
+static u32 ticks_to_ms(u32 ticks)
+{
+	return params.us_per_prd_tick*ticks/1000;
+}
+
+static u32 ms_to_ticks(u32 ms)
+{
+	return (ms*1000)/params.us_per_prd_tick;
+}
+
+//static u8 lastled;
+
+void usbhw_check_timeouts(void)
+{
+	usb_endpoint_t *ep;
+	u32 curtime=CLK_getltime();
+
+	ep=usb_get_first_ep(usb_get_config());
+	while (ep) {
+		if (ep->data->stat==USB_EPSTAT_XFER) {
+			if (ticks_to_ms(curtime-ep->data->check_time)>ep->data->timeout)
+				usb_evt_timeout(ep);
+		}
+		ep=ep->next;
+	}
+#if 0
+	++lastled;
+	if (lastled>99) lastled=0;
+	if (!(lastled%10))
+		led_showdig(lastled/10);
+#endif
+}
+
+/* alarm clock ----------------- */
+
+usb_alarm_t *usbhw_mkalarm(void)
+{
+	volatile usb_alarm_t *alm;
+
+	alm=(usb_alarm_t *)SEM_create(0,NULL);
+	return (usb_alarm_t *)alm;
+}
+
+void usbhw_rmalarm(usb_alarm_t *alarm)
+{
+	SEM_post((SEM_Handle)alarm);
+	SEM_delete((SEM_Handle)alarm);
+}
+
+int usbhw_sleep(usb_alarm_t *alarm, int timeout_ms)
+{
+	if (!timeout_ms) {
+		SEM_pend((SEM_Handle)alarm,SYS_FOREVER);
+	} else {
+		if (!SEM_pend((SEM_Handle)alarm,ms_to_ticks(timeout_ms)))
+			return -1;
+	}
+	return 0;
+}
+
+void usbhw_wake(usb_alarm_t *alarm)
+{
+	SEM_post((SEM_Handle)alarm);
+}
+
+/* ------------------------------- */
 
 void usbhw_int_dis(void)
 {
@@ -41,7 +155,7 @@ void usbhw_int_en_presof(void)
 void usbhw_int_en_txdone(int epn)
 {
 	if (epn<16||epn>23) return;
-	USBIEPIE|=(1<<(epn-16));
+	USBIEPIE|=(1<<(epn-8));
 }
 
 void usbhw_int_en_rxdone(int epn)
@@ -190,51 +304,45 @@ void usbhw_ctl_read_handshake(void)
 	USBCTL&=~USBCTL_DIR;
 }
 
-#if 0
-static void epReload(int epn, usb_endpoint_t *ep, usb_data_t *data, u16 len)
-{
-	//ep->data->reload=buf;
-	usb_dma_set_rld_ptr(epn,data);
-	USBODRSZ(epn)=len;
-	USBODCTL(epn)|=USBODCTL_RLD;
-}
+// ---------------------------------------------------------------------
 
-static void isrOUT(int epn)
+static void showtoggle(void)
 {
-	usb_endpoint_t *ep;
-	usb_buffer_t buf;
-	u16 dctl;
-	
-	ep=usb_get_ep(usb_get_config(),epn);
-	if (!ep) return;
-	if (epn>15) epn-=8;
-	dctl=USBODCTL(epn);
-	if (!(dctl&USBODCTL_GO)) {
-		// no transfers, so start one
-		//buf=ep->data->cb.o(epn,0);
-		//if (!buf) return; // oops, no buffer, oh well
-		//epGo(epn,ep,buf);
-	}
+	if (USBICNF(9)&USBICNF_TOGGLE)
+		led_showdig(1);
+	else
+		led_showdig(0);
 }
-#endif
 
 void usbhw_cancel(usb_endpoint_t *ep)
 {
 	int epn=ep->id;
 
 	if (epn>15) epn-=8;
-	((usb_packet_req_t *)(ep->data->hwdata))->done=1;
+	//((usb_packet_req_t *)(ep->data->hwdata))->done=1;
 	if (USBIDCTL(epn)&USBIDCTL_GO) {
 		USBIDCTL(epn)|=USBIDCTL_STP;
 		USBIDCTL(epn)&=~USBIDCTL_RLD;
 	}
-	USBICTX(epn)|=USBICTX_NAK;
-	USBICTY(epn)|=USBICTY_NAK;
+	// if only one buffer has NAK off, then probably TOGGLE is wrong
+	// and needs to be inverted manually
+	//showtoggle();
+#if 0
+	if (ep->type!=USB_EPTYPE_ISOCHRONOUS) {
+		if ((USBICTX(epn)&USBICTX_NAK)^(USBICTY(epn)&USBICTY_NAK)) {
+			USBICNF(epn)^=USBICNF_TOGGLE;
+		}
+	}
+	showtoggle();
+#endif
+	//USBICTX(epn)|=USBICTX_NAK;
+	//USBICTY(epn)|=USBICTY_NAK;
 }
 
 // works for out and in both
 static void dmaGo(int epn, u32 data, u16 len)
 {
+	if (epn==17) usbhw_dmalog_write(11,epn);
 	if (epn>15) epn-=8;
 	//usb_dma_set_ptr(epn,data);
 	USBODADL(epn)=data&0xffff;
@@ -242,11 +350,15 @@ static void dmaGo(int epn, u32 data, u16 len)
 	/* this should not even work, but in fact it's required */
 	USBODCT(epn)=0;
 	USBODSIZ(epn)=len;
-	USBODCTL(epn)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END;
+	//USBOCTX(epn)=USBOCTX_NAK|len;
+	//USBOCTY(epn)=USBOCTY_NAK|len;
+	USBODCTL(epn)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END|USBODCTL_SHT;
+	if (epn==9) usbhw_dmalog_write(12,epn+8);
+	//showtoggle();
 }
 
 #define RXTX {\
-	usb_packet_req_t *pkt=(usb_packet_req_t *)(pkt->ep->data->hwdata);\
+	usb_packet_req_t *pkt=(usb_packet_req_t *)(ep->data->hwdata);\
 \
 	if (!pkt->done) return -1;\
 	pkt->ep=ep;\
@@ -259,29 +371,74 @@ static void dmaGo(int epn, u32 data, u16 len)
 }
 
 int usbhw_tx(usb_endpoint_t *ep, usb_data_t *data, u16 len)
-RXTX
+{
+/*	usb_packet_req_t *pkt=(usb_packet_req_t *)(ep->data->hwdata);
+
+	if (!pkt->done) return -1;
+	pkt->ep=ep;
+	pkt->data=data;
+	pkt->reqlen=len;
+	pkt->actlen=0;
+	pkt->done=0; */
+	update_check_time(ep);
+	dmaGo(ep->id,(u32)(data)<<1,len);
+	return 0;
+}
 
 int usbhw_rx(usb_endpoint_t *ep, usb_data_t *data, u16 len)
-RXTX
+{
+/*	usb_packet_req_t *pkt=(usb_packet_req_t *)(ep->data->hwdata);
+
+	if (!pkt->done) return -1;
+	pkt->ep=ep;
+	pkt->data=data;
+	pkt->reqlen=len;
+	pkt->actlen=0;
+	pkt->done=0; */
+	update_check_time(ep);
+	dmaGo(ep->id,(u32)(data)<<1,len);
+	return 0;
+}
 
 #undef RXTX
 
 static void isrDMA(int epn, int rld)
 {
 	usb_endpoint_t *ep;
-	usb_packet_req_t *pkt;
+	//volatile u16 x,y;
+	//usb_packet_req_t *pkt;
 
 	ep=usb_get_ep(usb_get_config(),epn);
 	if (!ep) return;
-	pkt=(usb_packet_req_t *)(ep->data->hwdata);
-	pkt->done=1;
+	//usbhw_dmalog_write(USBHW_DMALOG_ISRDMA,epn);
+	// we get an interrupt even on timeout, so we need to check this
+	// can't use timed_out because sometimes it gets cleared before 
+	// we get the interrupt
+	if (ep->data->stat!=USB_EPSTAT_XFER) return;
+	update_check_time(ep);
+	//pkt=(usb_packet_req_t *)(ep->data->hwdata);
+	//pkt->done=1;
 	//txpkt->actlen=txpkt->reqlen;
 	if (epn>15) epn-=8;
-	ep->actlen+=USBODCT(epn);
+	ep->data->actlen+=USBODCT(epn);
+	//x=USBISIZ(epn);
+	//y=USBICTY(epn);
 	usb_evt_cpdone(ep);
+	showtoggle();
 }
 
-void usbhw_isr(void)
+// all we do here is update the timeout
+static void isrEP(int epn)
+{
+	usb_endpoint_t *ep;
+
+	if (epn>8) epn+=8;
+	ep=usb_get_ep(usb_get_config(),epn);
+	if (!ep) return;
+	update_check_time(ep);
+}
+
+interrupt void usbhw_isr(void)
 {
 	u8 src=USBINTSRC;
 	
@@ -323,17 +480,13 @@ void usbhw_isr(void)
 			return;
 		}
 	} 
-#if 0
 	else if (src<0x2E) { // endpoint interrupt
 		if (src&1) { // spurious
 			//usb_unlock();
 			return;
 		}
-		src=(src-0x10)>>1; // src is now the endpoint number
-		if (!(src&8)) isrOUT(src); // no tx interrupt
-	} else 
-#endif
-	if (src>=0x32&&src<0x4f) { // dma
+		isrEP((src-0x10)>>1);
+	} else if (src>=0x32&&src<0x4f) { // dma
 		//if (src<0x32) {
 			//usb_unlock();
 		//	return; // spurious
@@ -344,7 +497,7 @@ void usbhw_isr(void)
 			if (src<8)
 				isrDMA(src,0);
 			else
-				isrDMA(src+16,0);
+				isrDMA(src+8,0);
 		}
 #if 0
 		else { // reload
@@ -403,110 +556,139 @@ void usbhw_set_address(u8 adr)
 	USBADDR=adr;
 }
 
-// returns the buffer base adr assigned to the given endpoint
-// the beginning of the X buffer is returned.  Y is assumed to 
-// be the same size and starts after the X buffer.
+/* Returns the buffer base adr assigned to the given endpoint, 
+relative to the base address of the USB module.  The address is 
+a byte address.  The first usable address is 0x80 since the 
+data buffers start there (the DMA registers are in 0-0x80).
+
+The beginning of the X buffer is returned.  Y is the same size 
+and starts immediately after the X buffer.
+*/
 static u16 usbhw_get_ep_buf_ofs(u8 epn)
 {
+	volatile u16 b;
+
 	if (epn>=16)
-		return (((u16)(USBIBAX(epn-8))<<4)-0x80);
+		return ((u16)(USBIBAX(epn-8)))<<4;
 	else
-		return (((u16)(USBOBAX(epn))<<4)-0x80);
+		b=((u16)(USBOBAX(epn)))<<4;
+	return b;
 }
 
-static void usbhw_set_ep_buf_ofs(u8 epn, u16 ofs)
-{
-	if (epn>=16)
-		USBIBAX(epn-8)=(u8)((ofs-0x80)>>4);
-	else
-		USBOBAX(epn)=(u8)((ofs-0x80)>>4);
-}
+/* Sets the buffer base addresses and sizes for the X and Y buffers for 
+the given endpoint.  The address is a byte address and is relative 
+to the base address of the USB module.  The first usable address 
+is therefore 0x80.
 
-// returns -1 if it runs out of space
-static int usbhw_alloc_ep_buf(int config, usb_endpoint_t *ep)
+Packet size is taken from ep->packetSize.  If the endpoint is isochronous, 
+SIZH is written; otherwise only SIZ is written.
+*/
+static void set_ep_hwbuf(usb_endpoint_t *ep, u16 ofs)
 {
-	int i;
-	usb_endpoint_t *oldep;
-	u16 ofs,b;
+	int epn=ep->id;
 
-	ofs=0;
-	oldep=0;
-	for (i=1;i<16;++i) {
-		if (i==8) continue;
-		b=usbhw_get_ep_buf_ofs(i);
-		if (b>ofs) {
-			oldep=usb_get_ep(config,i);
-			if (oldep)
-				ofs=b;
-			else
-				oldep=0;
-		}
+	if (epn>=16) epn-=8;
+	USBIBAX(epn)=(u8)(ofs>>4);
+	USBIBAY(epn)=(u8)((ofs+64)>>4);
+	USBISIZ(epn)=ep->packetSize&0x7f;
+	if (ep->type==USB_EPTYPE_ISOCHRONOUS) {
+		if (epn<8)
+			USBOCNF(epn)=(USBOCNF(epn)&0xf8)|((ep->packetSize>>7)&7);
+		else
+			USBOCNF(epn)=(ep->packetSize>>7)&7;
 	}
-	if (oldep)
-		ofs+=oldep->packetSize*2;
-	if (ofs+(ep->packetSize*2)>3584)
-		return -1;
-	usbhw_set_ep_buf_ofs(ep->id,ofs);
+}
+
+static int alloc_ep_buffers(int conf)
+{
+	u16 ofs;
+	usb_endpoint_t *ep;
+
+	ofs=0x80;
+	ep=usb_get_first_ep(conf);
+	while (ep) {
+		if (ofs+ep->packetSize*2>=0xe80)
+			return -1;
+		set_ep_hwbuf(ep,ofs);
+		ofs+=ep->packetSize*2;
+		ep=ep->next;
+	}
 	return 0;
 }
 
-extern Int auxheap;
-
-int usbhw_activate_ep(usb_endpoint_t *ep)
+static int activate_ep(usb_endpoint_t *ep)
 {
 	int epn=ep->id;
-	u8 cnf=0;
-	usb_packet_req_t *pkt;
+	//usb_packet_req_t *pkt;
 
 	if (epn>15) epn-=8;
-	pkt=(usb_packet_req_t *)MEM_alloc(auxheap,sizeof(usb_packet_req_t),0);
-	if (!pkt) {
-		USBICNF(epn)=0;
-		return -1;
-	}
+	USBICNF(epn)=0;
+	/*pkt=(usb_packet_req_t *)sys_malloc(sizeof(usb_packet_req_t));
+	if (!pkt) return -1;
 	ep->data->hwdata=(void *)pkt;
-	pkt->done=1;
-	if (usbhw_alloc_ep_buf(usb_get_config(),ep)) {
-		USBICNF(epn)=0;
-		return -1;
-	}
-	USBISIZ(epn)=ep->packetSize&0x7f;
+	pkt->done=1;*/
 	if (ep->type==USB_EPTYPE_ISOCHRONOUS) {
-		cnf|=USBICNF_ISO;
-		cnf|=(ep->packetSize>>7)&7;
+		USBICNF(epn)|=USBICNF_ISO;
 	} else {
-		cnf|=USBICNF_DBUF;
+		USBICNF(epn)|=USBICNF_DBUF;
 	}
-	USBICNF(epn)=cnf;
-	USBICTX(epn)=USBICTX_NAK;
-	USBICTY(epn)=USBICTY_NAK;
+	if (epn>8) {
+		USBICTX(epn)=USBICTX_NAK;
+		USBICTY(epn)=USBICTY_NAK;
+	} else {
+		USBOCTX(epn)=0;
+		USBOCTY(epn)=0;
+	}
 	USBIDCTL(epn)=0;
 	USBIDADH(epn)=0;
 	USBIDADL(epn)=0;
 	USBIDSIZ(epn)=0;
-	USBICTX(epn)=0;
-	USBICTY(epn)=0;
 	USBICNF(epn)|=USBICNF_UBME;
 	if (epn>7) {
-		//USBIEPIE|=1<<(epn-16);
 		USBIDIE|=1<<(epn-8);
 	} else {
-		//USBOEPIE|=1<<epn;
 		USBODIE|=1<<epn;
 	}
 	return 0;
 }
 
-void usbhw_deactivate_ep(usb_endpoint_t *ep)
+int usbhw_activate_eps(int cnf)
 {
-	USBICNF(ep->id)=0;
-	if (ep->data->hwdata) free(ep->data->hwdata);
+	usb_endpoint_t *ep;
+
+	ep=usb_get_first_ep(cnf);
+	while (ep) {
+		if (activate_ep(ep))
+			return -1;
+		ep=ep->next;
+	}
+	if (alloc_ep_buffers(cnf))
+		return -1;
+	return 0;
+}
+
+void usbhw_deactivate_eps(int cnf)
+{
+	usb_endpoint_t *ep;
+
+	ep=usb_get_first_ep(cnf);
+	while (ep) {
+		if (ep->id>16)
+			USBICNF(ep->id-8)=0;
+		else
+			USBOCNF(ep->id)=0;
+		if (ep->data->hwdata) {
+			sys_free(ep->data->hwdata);
+			ep->data->hwdata=0;
+		}
+		ep=ep->next;
+	}
 }
 
 //### TODO: support APLL on 5507 / 5509A
-static void usbhw_init_pll(void)
+static void usbhw_init_pll()
 {
-	int mult=48/(GBL_getClkIn()/1000);
+	int mult=48/(params.clkin_khz/1000);
 
 	if (mult>31) mult=31;
 	USBPLL=0x2012|(mult<<7); //### FIXME: can't do fractional mults ..
@@ -548,6 +730,12 @@ void usbhw_detach(void)
 
 int usbhw_init(void *param)
 {
+	if (!param) return -1;
+	params=*(struct c55x_params *)param;
 	usbhw_init_pll();
+
+	USBHW_DMA_LOGSIZE=2048;
+	usbhw_dmalog=malloc(sizeof(usbhw_dmalog_t)*USBHW_DMA_LOGSIZE);
+
 	return 0;
 }

@@ -5,6 +5,7 @@
 // :wrap=soft:
 
 #include "usbconfig.h"
+#include "portconf.h"
 
 extern usb_setup_t usb_setup;
 
@@ -41,7 +42,7 @@ void usb_set_sof_cb(usb_cb_sof cb);
 Some USB peripherals offer a pre-SOF interrupt.  This is timed to 
 occur at a fixed time before the next SOF interrupt occurs.  If the 
 hardware supports it, you can set this time using usb_set_presof_time().  
-The port documentation should say whether it supports this.
+See the port documentation for details.
 
 The callback takes no arguments and returns nothing.
 
@@ -135,44 +136,32 @@ void usb_remote_wakeup(void);
 */
 void usb_set_state_cb(usb_cb_state cb);
 
-//! Set endpoint status change callback
-/*! Sets the endpoint status change callback on the given endpoint.
-
-This callback notifies at every status change.  If only end-of-transaction notification is needed, usb_set_done_cb() can be used.
-
-The callback may be called at interrupt time, so it should be handled quickly.
-
-\sa usb_cb_epstat, usb_set_done_cb(), grp_epstat
-\ingroup grp_public_support
-*/
-void usb_set_epstat_cb(int epn, usb_cb_epstat cb);
-
 //! Get endpoint status
 /*! Returns the status of the given endpoint.  See grp_epstat for a list of possible states.
 
 This cannot be used for control endpoints; if it is, -1 is returned.
 
-\param[in] epn Endpoint number
+\param[in] ep Endpoint
 
 \sa grp_epstat
 */
-int usb_get_epstat(int epn);
+int usb_get_epstat(usb_endpoint_t *ep);
 
 //! Stall an endpoint
 /*! Stalls the given endpoint.  Does nothing if the endpoint is stalled 
 already.
 
-This cannot be used for the control endpoint; to stall a control 
+This cannot be used for the control endpoint.  To stall a control 
 endpoint, call usb_ctl_read_end() or usb_ctl_write_end() with a status 
 of 1.
 
-\param[in] epnum Endpoint number
+\param[in] ep Endpoint
 \retval 0 Success
 \retval -1 Invalid endpoint
 
 \ingroup grp_public_io
 */
-int usb_stall(u8 epnum);
+int usb_stall(usb_endpoint_t *ep);
 
 //! Unstall an endpoint
 /*! Unstalls the given endpoint.  Does nothing if the endpoint is not 
@@ -181,31 +170,27 @@ stalled.
 This cannot be used for the control endpoint.  Control endpoints are 
 unstalled when a SETUP arrives.
 
-\param[in] epnum Endpoint number
+\param[in] ep Endpoint
 \retval 0 Success
 \retval -1 Invalid endpoint
 
 \ingroup grp_public_io
 */
-int usb_unstall(u8 epnum);
+int usb_unstall(usb_endpoint_t *ep);
 
 //! Find out whether endpoint is stalled
-/*! Returns 1 if the given endpoint is stalled, 0 if the endpoint 
-is not stalled, or -1 if the endpoint number is invalid or if called 
-on the control endpoint.
+/*! Returns 1 if the given endpoint is stalled, 0 otherwise.
 
 This cannot be used for control endpoints.
 
-\retval 0 Endpoint is not stalled
-\retval 1 Endpoint is stalled
-\retval -1 Invalid endpoint
+\param[in] ep Endpoint
 
 \ingroup grp_public_io
 */
-int usb_is_stalled(u8 epnum);
+int usb_is_stalled(usb_endpoint_t *ep);
 
 //! Perform data I/O
-/*! Transmits or receives data.  On OUT endpoints (1-15), this call performs reception from the host; on IN endpoints (17-31), it performs transmission to the host.
+/*! Transmits or receives data.  On OUT endpoints, this call performs reception from the host; on IN endpoints, it performs transmission to the host.
 
 For transmission, PORUS will attempt to send all bytes requested, breaking up the buffer into shorter packets as necessary.  When all bytes have been sent, the endpoint status is changed and the callback is called (see below).  If the last packet is equal to the maximum packet size, PORUS sends an additional zero-byte packet, as recommended in the USB specification.
 
@@ -215,11 +200,11 @@ In nonblocking systems, usb_move() initiates the transaction, which proceeds in 
 
 In blocking systems, usb_move() performs the transaction before returning, copying data to the USB hardware as necessary.  Status can be checked from a different thread using usb_epstat(). When the transaction is complete, the endpoint status and I/O done callbacks are called, if set.
 
-This call cannot be used on the control endpoints.
+This call cannot be used on the control endpoints.  The control endpoints use a separate system for data transfer.
 
 \p len can be zero.  For transmission, this causes a zero-length packet to be transmitted; for reception, nothing happens.
 
-\note If a packet is received on an OUT endpoint, and no usb_move() has been issued, the next usb_move() will receive that packet.  Use usb_flush() to cancel unreceived packets on an OUT endpoint.
+\note If a packet is received on an OUT endpoint, and no usb_move() has been issued, the next usb_move() will receive that packet.  Use usb_cancel() to cancel unreceived packets on an OUT endpoint.
 
 If this call is made incorrectly, nothing happens, and an error code is returned.  Possible errors are:
 
@@ -228,9 +213,11 @@ If this call is made incorrectly, nothing happens, and an error code is returned
 - \p data is null
 - Endpoint is busy
 
-\param[in] epn Endpoint number; 1-31 except 16
+\param[in] ep Endpoint
 \param[in] data Pointer to data buffer to transmit
 \param[in] len Number of bytes to transmit
+\param[in] cb Callback; if 0, no callback is used
+\param[in] ptr Pointer to pass to callback
 
 \return Status code
 \retval 0 No error
@@ -238,56 +225,38 @@ If this call is made incorrectly, nothing happens, and an error code is returned
 \retval -2 Null data pointer
 \retval -3 Endpoint is busy
 
-\sa usb_epstat(), usb_set_epstat_cb(), usb_set_done_cb()
+\sa usb_epstat(), usb_cb_done
 \ingroup grp_public_io
 */
-int usb_move(u8 epn, usb_data_t *data, u32 len);
+int usb_move(usb_endpoint_t *ep, usb_data_t *data, 
+	u32 len, usb_cb_done cb, void *ptr);
 
-//! Perform a bulk reception
-/*! Receives data from a bulk endpoint.
+//! Move data and wait for completion
+/*! Same as usb_move(), but blocks until the transfer is complete, and no callback is called.
 
-On nonblocking systems, this causes the stack to receive len bytes of data to the given buffer from the given endpoint, once the host sends it.
+\param[in] ep Endpoint
+\param[in] data Data buffer
+\param[in] len Number of bytes to move
+\return Status code
+\retval 0 Success
+\retval -1 Invalid endpoint
+\retval -2 Null data pointer
+\retval -3 Endpoint is busy
 
-On blocking systems, this waits for the host to send data, copies it to the buffer, then returns.
-
-When the transfer is complete, or when the timeout has passed, the epstat callback is called.
-
-This call cannot be used on the control endpoint.
-
-\ingroup grp_public_io
+\sa usb_set_ep_timeout(), usb_move()
 */
-int usb_rx(u8 epn, usb_data_t *data, u32 len);
+int usb_move_wait(usb_endpoint_t *ep, usb_data_t *data, u32 len);
 
 //! Immediately stop the endpoint from sending data
 /*! Cancels a transaction in progress.
 
-This might not take effect immediately.  In particular, if the host is in the middle of moving a packet, this function does not cancel it.  However, at the next possible opportunity the endpoint will NAK further IN or OUT requests from the host.
+This may not take effect immediately.  In particular, if the host is in the middle of moving a packet, this function does not cancel it.  However, at the next possible opportunity the endpoint will NAK further IN or OUT requests from the host.
+
+\param[in] ep Endpoint
 
 \ingroup grp_public_io
 */
-void usb_bulk_cancel(u8 epn);
-
-//! Set endpoint's timeout
-/*! Set the endpoint's timeout.
-
-For receive endpoints, the timeout starts over when usb_bulk_rx() is called and when OUT packets are received, and expires when the timeout passes without any OUT packets from the host being received within an expected time.
-
-For transmit endpoints, the timeout works the same, except that IN packets are expected.
-
-A value of zero disables the timeout.
-
-Not all systems support timeout.  On those that do, the accuracy of the timeout depends on the accuracy of the usbhw_time() function.
-
-This call does not work for the control endpoints.
-
-If this call is made for an invalid endpoint, nothing is done.
-
-\param epn Endpoint number.  Must be 1-15 or 17-31.
-\param timeout Timeout in milliseconds.
-
-\ingroup grp_public_io
-*/
-void usb_set_ep_timeout(int epn, u16 timeout);
+void usb_cancel(usb_endpoint_t *ep);
 
 //! Callback for control transactions
 /*! This function is a required callback, and must be supplied by the user.
@@ -316,30 +285,65 @@ call this before processing a setup packet.
 int usb_ctl_std(void);
 
 //! Conclude a control read
-/*! Ends a control read, either with a stall or by returning data.
+/*! Ends a control read. The data in \p data is returned to the host along with an ACK.
 
-If \p stat is 1, the control endpoint is stalled.  Otherwise, data is 
-returned using \p len and \p data .
-
-\param[in] stat Status.  0 to ACK, 1 to stall.
-\param[in] len Length of returned data in bytes.  Ignored if 
-\p stall is 1.
-\param[in] data Pointer to data to transmit.  Ignored if 
-\p stall is 1.
+\param[in] len Length of returned data in bytes.
+\param[in] data Pointer to data to transmit.
 
 \ingroup grp_public_control
 */
-void usb_ctl_read_end(int stat, int len, usb_data_t *data);
+void usb_ctl_read_end(int len, usb_data_t *data);
 
 //! Conclude a control write
-/*! Ends a control write, either with a stall or with an ACK 
-handshake.  If \p stat is 1, the control endpoint is stalled; 
-if 0, an ACK is returned.
-
-\param[in] stat Status.  0 to ACK, 1 to stall.
+/*! Ends a control write.  An ACK is returned to the host.
 
 \ingroup grp_public_control
 */
-void usb_ctl_write_end(int stat);
+void usb_ctl_write_end(void);
+
+void usb_ctl_stall(void);
+
+//! Set endpoint timeout
+/*! Sets the timeout for the given endpoint in milliseconds.
+
+The timeout is, roughly speaking, the maximum amount of quiet time that may pass for an endpoint which is participating in a transfer.  The default is three seconds.
+
+The accuracy of the timeout mechanism depends on the port.  See the port notes for details.
+
+Zero disables timeouts; the endpoint will wait forever.
+
+\param[in] ep Endpoint
+\param[in] ms Timeout in milliseconds, or 0 to disable
+*/
+void usb_set_ep_timeout(usb_endpoint_t *ep, u16 ms);
+
+//! Get endpoint timeout
+/*! Returns the timeout set for the given endpoint, in milliseconds.  Zero indicates that no timeout is active.
+
+\param[in] ep Endpoint
+
+\sa usb_set_ep_timeout()
+*/
+u16 usb_get_ep_timeout(usb_endpoint_t *ep);
+
+//! Clear timeout status for an endpoint
+/*! If an endpoint has timed out, the timeout status must be cleared with this function.
+
+If the endpoint is not timed out, this function does nothing.
+
+\param[in] ep Endpoint
+
+\sa usb_set_ep_timeout()
+*/
+void usb_clear_timeout(usb_endpoint_t *ep);
+
+//! Check timeout status for an endpoint
+/*! Returns 1 if the endpoint has timed out since the last call to usb_clear_timeout().
+
+\param[in] ep Endpoint
+
+\sa usb_set_ep_timeout()
+*/
+int usb_check_timeout(usb_endpoint_t *ep);
 
 #endif

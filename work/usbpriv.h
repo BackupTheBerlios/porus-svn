@@ -2,11 +2,9 @@
 #ifndef GUARD_usbpriv_h
 #define GUARD_usbpriv_h
 
-#include "usb.h"
+// :wrap=soft:
 
-/*! \addtogroup grp_private
-@{
-*/
+#include "usb.h"
 
 //! Called when a packet copy is complete
 /*! This function is called by the hardware layer when the data for a received packet request has been copied into user memory, or when user memory has been copied to USB.  It may be called as a result of a copy completing, or as a result of a DMA interrupt.
@@ -15,11 +13,12 @@ May be called under interrupt, especially on DMA systems.
 */
 void usb_evt_cpdone(usb_endpoint_t *ep);
 
-//! Called if IN is not received in time
-void usb_evt_txtimeout(usb_endpoint_t *ep);
+//! Called to signal a timeout on an endpoint
+/*! Sets the timeout status on the given endpoint and cancels any pending transactions.
 
-//! Called if OUT is not received in time
-void usb_evt_rxtimeout(usb_endpoint_t *ep);
+\param[in] ep Endpoint
+*/
+void usb_evt_timeout(usb_endpoint_t *ep);
 
 //! Called in response to a bus reset
 void usb_evt_reset(void);
