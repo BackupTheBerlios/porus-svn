@@ -5,9 +5,15 @@
 // :wrap=soft:
 
 //#define USBHW_HAVE_BLOCKING
-//#define USBHW_HAVE_TIMEOUT
+
+/*! Define this if the port supports timeouts */
+#define USBHW_HAVE_TIMEOUT
+
+/*! Define this if the hardware can attach / deattach from the bus */
 #define USBHW_HAVE_ATTACH
-#define USBHW_DMA_LOGGING
+
+/*! Defined if the hardware supports auto-chaining */
+#define USBHW_AUTO_CHAIN
 
 //! C55X parameters
 /*! This structure is used to initialise the C55X port. */
@@ -65,11 +71,18 @@ check_time is updated by the static function update_check_time(), which calls PR
 
 check_time is set at the following points:
 
-- In usbhw_tx() and usbhw_rx()
+- In the i/o functions
 - At the DMA interrupt
 - At IN and OUT interrupts
 
 */
+
+void usbhw_pack55(u8 *src, u16 *dest, u16 len);
+void usbhw_unpack55(u16 *src, u8 *dest, u16 len);
+
+//#define USBHW_DMALOG
+
+#ifdef USBHW_DMALOG
 
 #define USBHW_DMALOG_ISRDMA 0
 #define USBHW_DMALOG_DMAGO 1
@@ -95,5 +108,11 @@ typedef struct usbhw_dmalog_t {
 
 extern volatile usbhw_dmalog_t *usbhw_dmalog;
 void usbhw_dmalog_write(u8 id, u8 epn);
+
+#else
+
+#define usbhw_dmalog_write(x,y)
+
+#endif
 
 #endif

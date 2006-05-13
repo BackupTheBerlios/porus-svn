@@ -14,11 +14,11 @@ static usb_cb_state stateChangeCallback;
 void usb_cancel(usb_endpoint_t *ep)
 {
 	if (!ep) return;
+	usb_set_epstat(ep,USB_EPSTAT_CANCELLING);
 	usbhw_cancel(ep);
-	usb_set_epstat(ep,USB_EPSTAT_IDLE);
-	//ep->data->xferInProgress=0;
 }
 
+#if 0
 int usb_move(usb_endpoint_t *ep, usb_data_t *data, u32 len, usb_cb_done cb, void *ptr)
 {
 	if (!ep) return -1;
@@ -66,6 +66,7 @@ int usb_move_wait(usb_endpoint_t *ep, usb_data_t *data, u32 len)
 	}
 	return 0;
 }
+#endif
 
 #if 0
 void usb_evt_cpdone(usb_endpoint_t *ep)
@@ -89,7 +90,6 @@ void usb_evt_cpdone(usb_endpoint_t *ep)
 	else
 		usbhw_rx(ep,data,l);
 }
-#endif
 
 void usb_evt_cpdone(usb_endpoint_t *ep)
 {
@@ -112,6 +112,33 @@ void usb_evt_cpdone(usb_endpoint_t *ep)
 		usbhw_tx(ep,data,l);
 	else
 		usbhw_rx(ep,data,l);
+}
+#endif
+
+void usb_evt_done(usb_endpoint_t *ep, usb_data_t *data, u16 len, u8 evt)
+{
+	//usb_set_epstat(ep,USB_EPSTAT_IDLE);
+	if (ep->data->evt_cb) ep->data->evt_cb(ep,data,len,evt);
+}
+
+int usb_rx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len)
+{
+	return usbhw_rx_chain(ep,data,len);
+}
+
+int usb_rx(usb_endpoint_t *ep, usb_data_t *data, u16 len)
+{
+	return usbhw_rx(ep,data,len);
+}
+
+int usb_tx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len)
+{
+	return usbhw_tx_chain(ep,data,len);
+}
+
+int usb_tx(usb_endpoint_t *ep, usb_data_t *data, u16 len)
+{
+	return usbhw_tx(ep,data,len);
 }
 
 void usb_set_sof_cb(usb_cb_sof cb)
@@ -152,7 +179,7 @@ int usb_stall(usb_endpoint_t *ep)
 {
 	if (!ep) return -1;
 	usbhw_stall(ep->id);
-	usb_set_epstat(ep,USB_EPSTAT_STALL);
+	usb_set_epstat(ep,USB_EPSTAT_STALLED);
 	return 0;
 }
 
@@ -180,9 +207,10 @@ static int activate_endpoints(int config)
 	}
 	ep=usb_get_first_ep(config);
 	while(ep) {
-		if (usb_get_epstat(ep)!=USB_EPSTAT_INACTIVE)
-			continue;
-		usb_set_epstat(ep,USB_EPSTAT_IDLE);
+		if (usb_get_epstat(ep)==USB_EPSTAT_INACTIVE) {
+			usb_set_epstat(ep,USB_EPSTAT_IDLE);
+			if (ep->data->evt_cb) ep->data->evt_cb(ep,0,0,USB_EVT_CONFIGURED);
+		}
 		ep=ep->next;
 	}
 	return 0;
@@ -198,6 +226,7 @@ static void deactivate_endpoints(void)
 	ep=usb_get_first_ep(config);
 	while(ep) {
 		usb_set_epstat(ep,USB_EPSTAT_INACTIVE);
+		if (ep->data->evt_cb) ep->data->evt_cb(ep,0,0,USB_EVT_DECONFIGURED);
 		ep=ep->next;
 	}
 }
@@ -285,6 +314,7 @@ void usb_set_state_cb(usb_cb_state cb)
 	stateChangeCallback=cb;
 }
 
+#if 0
 void usb_set_epstat(usb_endpoint_t *ep, int stat)
 {
 	if (!ep) return;
@@ -300,17 +330,13 @@ int usb_get_epstat(usb_endpoint_t *ep)
 	if (!ep) return USB_EPSTAT_UNUSED;
 	return ep->data->stat;
 }
+#endif
 
-void usb_clear_timeout(usb_endpoint_t *ep)
-{
-	if (!ep) return;
-	ep->data->timed_out=0;
-}
-
-int usb_check_timeout(usb_endpoint_t *ep)
+int usb_set_evt_cb(usb_endpoint_t *ep, usb_evt_cb cb)
 {
 	if (!ep) return -1;
-	return ep->data->timed_out;
+	ep->data->evt_cb=cb;
+	return 0;
 }
 
 u16 usb_get_ep_timeout(usb_endpoint_t *ep)
@@ -328,11 +354,9 @@ void usb_set_ep_timeout(usb_endpoint_t *ep, u16 ms)
 void usb_evt_timeout(usb_endpoint_t *ep)
 {
 	//usbhw_dmalog_write(USBHW_DMALOG_TIMEOUT,ep->id);
-	ep->data->timed_out=1;
-	ep->data->stat=USB_EPSTAT_IDLE;
+	if (usb_get_epstat(ep)!=USB_EPSTAT_XFER) return;
+	usb_set_epstat(ep,USB_EPSTAT_TIMING_OUT);
 	usbhw_cancel(ep);
-	if (ep->data->done_cb)
-		ep->data->done_cb(ep->data->cb_ptr,USB_EPSTAT_TIMEOUT);
 }
 
 int usb_is_attached(void)
@@ -381,8 +405,8 @@ void usb_init(void *param)
 		ep->data->timed_out=0;
 		ep->data->timeout=3000;
 		//ep->data->epstat_cb=0;
-		ep->data->done_cb=0;
-		ep->data->cb_ptr=0;
+		ep->data->evt_cb=0;
+		//ep->data->cp_ptr=0;
 		ep->data->buf=0;
 		ep->data->reqlen=0;
 		ep->data->actlen=0;

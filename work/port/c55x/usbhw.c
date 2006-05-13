@@ -10,6 +10,7 @@
 
 //#include "libmmb0/ui.h"
 
+#ifdef USBHW_DMALOG
 static u16 USBHW_DMA_LOGSIZE;
 volatile usbhw_dmalog_t *usbhw_dmalog;
 static int usbhw_dmalog_index=0;
@@ -31,6 +32,29 @@ void usbhw_dmalog_write(u8 id, u8 epn)
 	l.dmacount=USBODCT(epn);
 	l.id=id;
 	usbhw_dmalog[usbhw_dmalog_index++]=l;
+}
+#endif
+
+void usbhw_pack55(u8 *src, u16 *dest, u16 len)
+{
+	if (!len) return;
+	for(;;) {
+		*dest=*src++<<8;
+		if (!--len) break;
+		*dest++|=*src++&0xff;
+		if (!--len) break;
+	}
+}
+
+void usbhw_unpack55(u16 *src, u8 *dest, u16 len)
+{
+	if (!len) return;
+	for (;;) {
+		*dest++=*src>>8;
+		if (!--len) break;
+		*dest++=*src++&0xff;
+		if (!--len) break;
+	}
 }
 
 #if 0
@@ -339,8 +363,14 @@ void usbhw_cancel(usb_endpoint_t *ep)
 	//USBICTY(epn)|=USBICTY_NAK;
 }
 
-// works for out and in both
-static void dmaGo(int epn, u32 data, u16 len)
+/* works for out and in both.
+
+epn: endpoint no. 0-31.  16 and up are IN
+data: this is a **BYTE ADDRESS**!  adrs coming from 55x code must be shifted <<1
+len: dma xfer length
+chain: if 1, dma will handle or append short packets, see docs.
+*/
+static void dmaGo(int epn, u32 data, u16 len, int chain)
 {
 	if (epn==17) usbhw_dmalog_write(11,epn);
 	if (epn>15) epn-=8;
@@ -352,52 +382,42 @@ static void dmaGo(int epn, u32 data, u16 len)
 	USBODSIZ(epn)=len;
 	//USBOCTX(epn)=USBOCTX_NAK|len;
 	//USBOCTY(epn)=USBOCTY_NAK|len;
-	USBODCTL(epn)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END|USBODCTL_SHT;
+	if (chain)
+		USBODCTL(epn)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END|USBODCTL_SHT;
+	else
+		USBODCTL(epn)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END;
 	if (epn==9) usbhw_dmalog_write(12,epn+8);
 	//showtoggle();
 }
 
-#define RXTX {\
-	usb_packet_req_t *pkt=(usb_packet_req_t *)(ep->data->hwdata);\
-\
-	if (!pkt->done) return -1;\
-	pkt->ep=ep;\
-	pkt->data=data;\
-	pkt->reqlen=len;\
-	pkt->actlen=0;\
-	pkt->done=0;\
-	dmaGo(ep->id,(u32)(data)<<1,len);\
-	return 0;\
-}
+#define RXTX(CHAIN) \
+	if (ep->data->stat!=USB_EPSTAT_IDLE) return -1;\
+	update_check_time(ep);\
+	ep->data->buf=data;\
+	ep->data->reqlen=len;\
+	ep->data->actlen=0;\
+	usb_set_epstat(ep,USB_EPSTAT_XFER); \
+	dmaGo(ep->id,(u32)(data)<<1,len,CHAIN);\
+	return 0;
 
 int usbhw_tx(usb_endpoint_t *ep, usb_data_t *data, u16 len)
 {
-/*	usb_packet_req_t *pkt=(usb_packet_req_t *)(ep->data->hwdata);
-
-	if (!pkt->done) return -1;
-	pkt->ep=ep;
-	pkt->data=data;
-	pkt->reqlen=len;
-	pkt->actlen=0;
-	pkt->done=0; */
-	update_check_time(ep);
-	dmaGo(ep->id,(u32)(data)<<1,len);
-	return 0;
+	RXTX(0)
 }
 
 int usbhw_rx(usb_endpoint_t *ep, usb_data_t *data, u16 len)
 {
-/*	usb_packet_req_t *pkt=(usb_packet_req_t *)(ep->data->hwdata);
+	RXTX(0)
+}
 
-	if (!pkt->done) return -1;
-	pkt->ep=ep;
-	pkt->data=data;
-	pkt->reqlen=len;
-	pkt->actlen=0;
-	pkt->done=0; */
-	update_check_time(ep);
-	dmaGo(ep->id,(u32)(data)<<1,len);
-	return 0;
+int usbhw_tx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len)
+{
+	RXTX(1)
+}
+
+int usbhw_rx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len)
+{
+	RXTX(1)
 }
 
 #undef RXTX
@@ -410,21 +430,35 @@ static void isrDMA(int epn, int rld)
 
 	ep=usb_get_ep(usb_get_config(),epn);
 	if (!ep) return;
+	if (epn>15) epn-=8;
+	ep->data->actlen+=USBODCT(epn);
 	//usbhw_dmalog_write(USBHW_DMALOG_ISRDMA,epn);
 	// we get an interrupt even on timeout, so we need to check this
+	// (this is good b/c we can use this to detect a completed cancellation)
+	if (ep->data->stat==USB_EPSTAT_CANCELLING) {
+		usb_set_epstat(ep,USB_EPSTAT_IDLE);
+		usb_evt_done(ep,ep->data->buf,ep->data->actlen,USB_EVT_CANCELLED);
+		return;
+	}
+	if (ep->data->stat==USB_EPSTAT_TIMING_OUT) {
+		usb_set_epstat(ep,USB_EPSTAT_IDLE);
+		usb_evt_done(ep,ep->data->buf,ep->data->actlen,USB_EVT_TIMEOUT);
+		return;
+	}
 	// can't use timed_out because sometimes it gets cleared before 
 	// we get the interrupt
-	if (ep->data->stat!=USB_EPSTAT_XFER) return;
+	if (usb_get_epstat(ep)!=USB_EPSTAT_XFER) return;
 	update_check_time(ep);
 	//pkt=(usb_packet_req_t *)(ep->data->hwdata);
 	//pkt->done=1;
 	//txpkt->actlen=txpkt->reqlen;
-	if (epn>15) epn-=8;
-	ep->data->actlen+=USBODCT(epn);
+	//if (epn>15) epn-=8;
+	//ep->data->actlen+=USBODCT(epn);
 	//x=USBISIZ(epn);
 	//y=USBICTY(epn);
-	usb_evt_cpdone(ep);
-	showtoggle();
+	usb_set_epstat(ep,USB_EPSTAT_IDLE);
+	usb_evt_done(ep,ep->data->buf,ep->data->actlen,USB_EVT_READY);
+	//showtoggle();
 }
 
 // all we do here is update the timeout
@@ -734,8 +768,10 @@ int usbhw_init(void *param)
 	params=*(struct c55x_params *)param;
 	usbhw_init_pll();
 
+#ifdef USBHW_DMALOG
 	USBHW_DMA_LOGSIZE=2048;
 	usbhw_dmalog=malloc(sizeof(usbhw_dmalog_t)*USBHW_DMA_LOGSIZE);
+#endif
 
 	return 0;
 }

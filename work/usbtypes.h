@@ -112,31 +112,60 @@ These define the various states in which an endpoint can be.
 #define USB_EPSTAT_UNUSED 0
 
 //! Endpoint is idle
-/*! The endpoint is idle, is not stalled, and no transfers are taking place. */
+/*! The endpoint is configured, is not stalled, and no transfers are taking place on it.  The endpoint is ready for requests. */
 #define USB_EPSTAT_IDLE 1
 
 //! Transfer in progress
-/*! A data transfer is in progress. */
+/*! A data transfer is in progress.  The endpoint may be ready for requests if the port supports request queueing. */
 #define USB_EPSTAT_XFER 2
 
 //! Stalled
-/*! The endpoint is stalled.
-
-This status is never set on an endpoint; it is used with the done callback as a notification. */
-#define USB_EPSTAT_STALL 3
-
-//! Timed out
-/*! Endpoint timed out.
-
-This status is never set on an endpoint; it is used with the done callback as a notification. */
-#define USB_EPSTAT_TIMEOUT 4
+/*! The endpoint is stalled. */
+#define USB_EPSTAT_STALLED 3
 
 //! Inactive
-/*! Endpoint is not activated.  Endpoints begin in this state; they are 
-activated when the USB hardware turns on, and then they enter IDLE. */
-#define USB_EPSTAT_INACTIVE 5
+/*! The endpoint is not activated.  Endpoints are in this state when they are not part of a selected configuration.  When enumeration completes and the endpoints are configured, they enter IDLE. */
+#define USB_EPSTAT_INACTIVE 4
+
+//! Cancelling
+/*! The endpoint has one or more requests being cancelled, but the cancellation is still in progress. */
+#define USB_EPSTAT_CANCELLING 5
+
+//! Timing out
+/*! A timeout has occurred on the endpoint, and requests are being cancelled, but the cancellation is still in progress. */
+#define USB_EPSTAT_TIMING_OUT 6
 
 //!@}
+
+//! Endpoint is ready for a new request
+/*! The endpoint is ready for a new request.
+
+On some ports, a previous request may be in progress, but the endpoint can accept a new one for queuing. */
+#define USB_EVT_READY 1
+
+//! Timed out
+/*! A timeout occurred on the endpoint.  The request which timed out has been cancelled.  The amount of data actually transferred is passed in \p len (see usb_evt_cb).  If there are queued requests, the next one has been made active.  The endpoint may be ready for new requests. */
+#define USB_EVT_TIMEOUT 2
+
+//! Requests have been cancelled
+/*! All pending requests have been cancelled on the endpoint.  The endpoint is ready for new requests.  The \p data and \p len pointers are undefined. */
+#define USB_EVT_CANCELLED 3
+
+//! Endpoint is configured and ready
+/*! An endpoint has been enumerated and configured.  It is now ready for requests.
+
+\note A USB_EVT_READY event is not sent in addition to this event.
+*/
+#define USB_EVT_CONFIGURED 4
+
+//! Endpoint is no longer active
+/*! An endpoint which was configured is no longer configured, and has been made inactive.  Any pending requests have been cancelled, and the endpoint will no longer accept requests.
+
+This occurs when the USB cable is unplugged (this causes a suspend), a suspend or reset is detected, or a configuration change is made.
+
+\note USB_EVT_CANCELLED is not sent in addition to this event, even if requests were cancelled by the reset or suspension.
+*/ 
+#define USB_EVT_DECONFIGURED 5
 
 /*!
 \defgroup grp_ctl_phases Control transaction phases
@@ -154,8 +183,7 @@ See usb_setup_t#phase for information about these.
 /*! \defgroup grp_control_states Control machine states
 \ingroup grp_public_control
 
-These states are used by PORUS' control endpoint 
-handling system.  usb_ctl_state() reports this.
+These states are used by PORUS' control endpoint handling system.  usb_ctl_state() reports this.
 */
 //!@{
 /*! Either no transactions are in progress, or all 
@@ -309,23 +337,22 @@ typedef struct usb_setup_t {
 typedef struct usb_endpoint_t usb_endpoint_t;
 typedef struct usb_alarm_t usb_alarm_t;
 
-//! Transaction complete callback
-/*! Optionally called when a transaction completes, when passed to usb_move().
+//! Endpoint status notification callback
+/*! Optionally called when an endpoint event occurs.  Endpoint events are described in the documentation for the USB_EVT_* macros.
 
-\p ptr is a pointer chosen by the user, which can be used (for example) to identify the transaction.  \p stat reports the status of the transfer and can be one of the following:
+The request in question is identified by the \p data pointer.  For certain events, the number of bytes actually transmitted or received, and therefore written to or read from \p data, is passed in \p len; for others, these fields are undefined. \p evt identifies the event.
 
- - \a 0 Transfer completed, no problems
- - \a -1 Timeout occured; transfer did not complete
+This function may be called under interrupt.  It should execute quickly.
 
-This may be called at interrupt time, so it should execute quickly.
+\param ep Endpoint in question
+\param data Data buffer for the request
+\param len Number of bytes successfully transmitted or received
+\param evt Event code
 
-\param[in] ptr User pointer
-\param[in] stat Status code
-
-\sa usb_move()
 \ingroup grp_public_io
 */
-typedef void (*usb_cb_done)(void *ptr, int stat);
+typedef void (*usb_evt_cb)(usb_endpoint_t *ep, 
+	usb_data_t *data, u16 len, u8 evt);
 
 //! SOF callback
 /*! Called when a SOF (start-of-frame) token is received.  This is called at 
@@ -397,18 +424,16 @@ struct usb_endpoint_data_t {
 	u32 check_time;
 	//! Timeout in milliseconds; 0 = no timeout
 	u16 timeout;
-	//! Status callback
-	//usb_cb_epstat epstat_cb;
-	//! Transaction complete callback
-	usb_cb_done done_cb;
+	//! Endpoint event callback
+	usb_evt_cb evt_cb;
 	//! Callback pointer
-	void *cb_ptr;
+	//void *cb_ptr;
 	//! Pointer to data buffer
 	usb_data_t *buf;
 	//! Buffer length in bytes
-	u32 reqlen,
+	u32 reqlen;
 	//! Number of bytes having completed transmission or reception
-		actlen;
+	u32 actlen;
 	//! Generic pointer for port use
 	void *hwdata;
 };

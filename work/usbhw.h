@@ -84,19 +84,20 @@ This function's return code indicates whether the request could be accepted; it 
 int usbhw_tx(usb_packet_req_t *pkt);
 #endif
 
-//! Transmit a single USB packet
-/*! Submits the packet request \p pkt for transmission.
+//! Request a chained transmission
+/*! Causes the hardware to prepare to transmit the \p len bytes at \p data packet by packet, ending with a short packet.  The packet size is the endpoint's maximum.
 
-On blocking systems, this function copies the data to a holding buffer, where it becomes ready for an IN.  This function does not wait for an IN; it returns when the copy is complete.
+Since all data transfer is controlled by the host, there is no guarantee that the data will go out immediately; this function is therefore a request, and must not wait for the data to actually be transmitted.  When all of the data has been transmitted, the port must call usb_evt_done().
 
-On nonblocking systems using DMA, this function sets up and activates the DMA transfer to the hardware, and returns immediately.
+If the transmission request cannot be accepted, -1 is returned.
 
-On some systems, two or more requests can be active at once.  If no 
-requests can be accepted, -1 is returned.  This function should never block waiting for a request slot to become available, even on blocking systems.  The core decides whether and how to wait for a free slot.
+The port must set the endpoint status to USB_EPSTAT_XFER when it prepares the endpoint.  When the reception has finished, the port must set the endpoint status to USB_EPSTAT_IDLE, if no other transactions are pending.
 
-When a request is complete, the port must update the \c actlen field in the endpoint data structure, by adding to it the number of bytes actually transmitted.  If a timeout occurs, the port should call usb_set_epstat() to set the endpoint to the USB_EPSTAT_TIMEOUT state.  (It should \e not call this to report completion of the transaction: that is done by usb_evt_cpdone().)
+If a timeout occurs, the port must call usb_evt_done() with the proper status.
 
-Finally, the port must call usb_evt_cpdone().
+usb_evt_done() may be called under interrupt.
+
+This function is never called for the control endpoint.
 
 \param[in] ep Endpoint for transmission
 \param[in] data Pointer to beginning of data to be transmitted
@@ -104,17 +105,89 @@ Finally, the port must call usb_evt_cpdone().
 \return Status code
 \retval 0 Success
 \retval -1 Request could not be accepted
+\retval -2 Invalid endpoint
 
-\sa usb_evt_cpdone()
+\sa usb_evt_done()
+*/
+int usbhw_tx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len);
+
+//! Request a transmission
+/*! Causes the hardware to prepare to transmit the \p len bytes at \p data packet by packet.  A short packet is not appended.  The packet size is the endpoint's maximum.
+
+Since reception is controlled by the host, there is no guarantee that the data will go out immediately; this function is therefore a request, and must not wait for the data to actually be transmitted.  When all of the data has been transmitted, the port must call usb_evt_done().
+
+If the transmission request cannot be accepted, -1 is returned.
+
+The port must set the endpoint status to USB_EPSTAT_XFER when it prepares the endpoint.  When the reception has finished, the port must set the endpoint status to USB_EPSTAT_IDLE, if no other transactions are pending.
+
+If a timeout occurs, the port must call usb_evt_done() with the proper status.
+
+usb_evt_done() may be called under interrupt.
+
+This function is never called for the control endpoint.
+
+\param[in] ep Endpoint for transmission
+\param[in] data Pointer to beginning of data to be transmitted
+\param[in] len Length of data; clipped to maximum packet length
+\return Status code
+\retval 0 Success
+\retval -1 Request could not be accepted
+\retval -2 Invalid endpoint
+
+\sa usb_evt_done()
 */
 int usbhw_tx(usb_endpoint_t *ep, usb_data_t *data, u16 len);
 
+//! Make an endpoint ready for chained reception
+/*! Makes an endpoint ready for chained reception.  Packets are accepted and copied to \p data until either \p len bytes are received or a short packet is received.  The port then calls usb_evt_done().
+
+The port must set the endpoint status to USB_EPSTAT_XFER when it prepares the endpoint.  When the reception has finished, the port must set the endpoint status to USB_EPSTAT_IDLE, if no other transactions are pending.
+
+If a timeout occurs, the port calls usb_evt_done().
+
+usb_evt_done() may be called under interrupt.
+
+If the endpoint is busy, i.e. an unfinished reception request is in progress, this function returns -1.  Some ports may support multiple requests.
+
+Hardware should configure the endpoint so that it returns NAKs when a receive request is not pending.
+
+This function is never called for the control endpoint.
+
+\param[in] ep Endpoint for transmission
+\param[in] data Pointer to buffer for incoming data
+\param[in] len Maximum number of bytes to receive
+\retval 0 Success
+\retval -1 Request could not be accepted
+\retval -2 Invalid endpoint
+*/
+int usbhw_rx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len);
+
+//! Make an endpoint ready for reception
+/*! Makes an endpoint ready for reception.  Packets are accepted and copied to \p data until at least \p len bytes are received.  When \p len or more bytes have been received, possibly in multiple packets, the port must call usb_evt_done().  If \p len bytes are not received in time, or if reception is interrupted for too long, a timeout occurs.
+
+The port must set the endpoint status to USB_EPSTAT_XFER when it prepares the endpoint.  When the reception has finished, the port must set the endpoint status to USB_EPSTAT_IDLE, if no other transactions are pending.
+
+If a timeout occurs, the port must call usb_evt_done().
+
+usb_evt_done() may be called under interrupt.
+
+If the endpoint is busy, i.e. a reception request or chained reception request is in progress, this function returns -1.  Some ports may support multiple requests.
+
+Hardware should configure the endpoint so that it returns NAKs when a receive request is not pending.
+
+This function is never called for the control endpoint.
+
+*/
 int usbhw_rx(usb_endpoint_t *ep, usb_data_t *data, u16 len);
 
 //! Cancel any pending transaction
-/*! Attempts to cancel any transaction occurring on the given endpoint.
+/*! Attempts to cancel all requests occurring or pending on the given endpoint.
 
-It is generally not possible to stop a packet transmission in mid-stream; these should be considered atomic.  However, it may be possible to stop a DMA chain.  If any packets are queued and waiting, these should be stopped.
+It is usually not possible to stop a packet transmission.  However, it should be possible to stop a DMA operation, or to stop the hardware between packets.
+
+This function is called either because the user explicitly requested a cancellation, or because a timeout occurred.  These may be distinguished by the endpoint's status at the time of the call.  If the user requests a cancellation, the endpoint will have status USB_EPSTAT_CANCELLING; if a timeout occurs, the endpoint will have status USB_EPSTAT_TIMEOUT.
+
+When all requests have been successfully cancelled, and the endpoint is ready for a new request, usb_evt_done() must be called with the proper event: USB_EVT_TIMEOUT or USB_EVT_CANCELLED.  Note that this may be done in a DMA interrupt service routine, and not by this function.
 
 \param ep Endpoint to cancel on
 */

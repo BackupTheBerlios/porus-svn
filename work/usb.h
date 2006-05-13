@@ -139,13 +139,18 @@ void usb_set_state_cb(usb_cb_state cb);
 //! Get endpoint status
 /*! Returns the status of the given endpoint.  See grp_epstat for a list of possible states.
 
-This cannot be used for control endpoints; if it is, -1 is returned.
+This cannot be used for control endpoints.  If it is, -1 is returned.
 
 \param[in] ep Endpoint
+\retval >=0 Endpoint status
+\retval -1 Invalid endpoint
 
 \sa grp_epstat
 */
-int usb_get_epstat(usb_endpoint_t *ep);
+//int usb_get_epstat(usb_endpoint_t *ep);
+#define usb_get_epstat(EP) ((EP)?((EP)->data->stat):(-1))
+
+int usb_set_evt_cb(usb_endpoint_t *ep, usb_evt_cb cb);
 
 //! Stall an endpoint
 /*! Stalls the given endpoint.  Does nothing if the endpoint is stalled 
@@ -189,6 +194,7 @@ This cannot be used for control endpoints.
 */
 int usb_is_stalled(usb_endpoint_t *ep);
 
+#if 0
 //! Perform data I/O
 /*! Transmits or receives data.  On OUT endpoints, this call performs reception from the host; on IN endpoints, it performs transmission to the host.
 
@@ -225,7 +231,7 @@ If this call is made incorrectly, nothing happens, and an error code is returned
 \retval -2 Null data pointer
 \retval -3 Endpoint is busy
 
-\sa usb_epstat(), usb_cb_done
+\sa usb_epstat(), usb_evt_cb
 \ingroup grp_public_io
 */
 int usb_move(usb_endpoint_t *ep, usb_data_t *data, 
@@ -246,11 +252,100 @@ int usb_move(usb_endpoint_t *ep, usb_data_t *data,
 \sa usb_set_ep_timeout(), usb_move()
 */
 int usb_move_wait(usb_endpoint_t *ep, usb_data_t *data, u32 len);
+#endif
 
-//! Immediately stop the endpoint from sending data
-/*! Cancels a transaction in progress.
+//! Make an endpoint ready for reception
+/*! Makes an endpoint ready for reception.  Packets are accepted and copied to \p data until at least \p len bytes are received.  When \p len or more bytes have been received, possibly in multiple packets, the endpoint's status is updated (usb_get_epstat()), and the endpoint's event callback, if any, is called (usb_evt_cb).  If \p len bytes are not received in time, or if reception is interrupted for too long, a timeout occurs.
 
-This may not take effect immediately.  In particular, if the host is in the middle of moving a packet, this function does not cancel it.  However, at the next possible opportunity the endpoint will NAK further IN or OUT requests from the host.
+The event callback is called if a timeout or cancellation occurs; see usb_evt_cb for details.
+
+If the endpoint is busy, i.e. an unfinished reception request is in progress, this function returns -1.  Some ports may support multiple requests.
+
+This function cannot be used for the control endpoint.
+
+\param[in] ep Endpoint for transmission
+\param[in] data Pointer to buffer for incoming data
+\param[in] len Maximum number of bytes to receive
+\retval 0 Success
+\retval -1 Request could not be accepted
+\retval -2 Invalid endpoint
+
+\sa usb_evt_cb, usb_get_epstat()
+*/
+int usb_rx(usb_endpoint_t *ep, usb_data_t *data, u16 len);
+
+//! Make an endpoint ready for chained reception
+/*! Makes an endpoint ready for chained reception.  Packets are accepted and copied to \p data until either \p len bytes are received or a short packet is received.  After a short packet is received, the endpoint's status is updated (usb_get_epstat()), and the endpoint's event callback, if any, is called (usb_evt_cb).
+
+The event callback is also called if a timeout or cancellation occurs; see usb_evt_cb for details.
+
+If the endpoint is busy, i.e. an unfinished reception request is in progress, this function returns -1.  Some ports may support multiple requests.
+
+This function cannot be used for the control endpoint.
+
+\param[in] ep Endpoint for transmission
+\param[in] data Pointer to buffer for incoming data
+\param[in] len Maximum number of bytes to receive
+\retval 0 Success
+\retval -1 Request could not be accepted
+\retval -2 Invalid endpoint
+
+\sa usb_evt_cb, usb_get_epstat()
+*/
+int usb_rx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len);
+
+//! Request a transmission
+/*! Causes the hardware to prepare to transmit the \p len bytes at \p data packet by packet.  A short packet is not appended.  The packet size is the endpoint's maximum.
+
+Since all data transfer is controlled by the host, there is no guarantee that the data will go out immediately.  This function initiates a request, and does not wait for the data to be transmitted.  When all of the data has been transmitted, the endpoint's status (usb_get_epstat()) is updated and the endpoint's event callback is called, if any (usb_set_evt_cb(), usb_evt_cb).
+
+The callback is also called if a timeout or cancellation occurs; see usb_evt_cb for details.
+
+If the transmission request cannot be accepted, -1 is returned.
+
+This function cannot be used for the control endpoint.
+
+\param[in] ep Endpoint for transmission
+\param[in] data Pointer to beginning of data to be transmitted
+\param[in] len Length of data; clipped to maximum packet length
+\return Status code
+\retval 0 Success
+\retval -1 Request could not be accepted
+\retval -2 Invalid endpoint
+
+\sa usb_evt_cb, usb_get_epstat()
+*/
+int usbhw_tx(usb_endpoint_t *ep, usb_data_t *data, u16 len);
+
+//! Request a chained transmission
+/*! Causes the hardware to prepare to transmit the \p len bytes at \p data packet by packet, ending with a short packet.  The packet size is the endpoint's maximum.
+
+Since all data transfer is controlled by the host, there is no guarantee that the data will go out immediately.  This function initiates a request, and does not wait for the data to be transmitted.  When all of the data has been transmitted, the endpoint's status (usb_ep_stat()) is updated and the endpoint's callback is called, if any (usb_set_evt_cb(), usb_evt_cb).
+
+The callback is also called if a timeout or cancellation occurs; see usb_evt_cb for details.
+
+If the transmission request cannot be accepted, -1 is returned.
+
+This function cannot be used for the control endpoint.
+
+\param[in] ep Endpoint for transmission
+\param[in] data Pointer to beginning of data to be transmitted
+\param[in] len Length of data; clipped to maximum packet length
+\return Status code
+\retval 0 Success
+\retval -1 Request could not be accepted
+\retval -2 Invalid endpoint
+
+\sa usb_evt_cb, usb_get_epstat()
+*/
+int usbhw_tx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len);
+
+//! Cancel transfers
+/*! Cancels any transfer in progress on the endpoint.
+
+This may not take effect immediately.  USB packet transfer is usually hardware-controlled and cannot be cancelled.  However, the endpoint will NAK further IN or OUT requests from the host.
+
+This function causes the endpoint callback to be called with status of USB_EPSTAT_CANCELLED.  It does not change the endpoint's status.
 
 \param[in] ep Endpoint
 
@@ -306,7 +401,7 @@ void usb_ctl_stall(void);
 //! Set endpoint timeout
 /*! Sets the timeout for the given endpoint in milliseconds.
 
-The timeout is, roughly speaking, the maximum amount of quiet time that may pass for an endpoint which is participating in a transfer.  The default is three seconds.
+The timeout is, roughly speaking, the maximum amount of quiet time that may elapse for an endpoint with an active transfer request.  The default is three seconds.
 
 The accuracy of the timeout mechanism depends on the port.  See the port notes for details.
 
@@ -325,25 +420,5 @@ void usb_set_ep_timeout(usb_endpoint_t *ep, u16 ms);
 \sa usb_set_ep_timeout()
 */
 u16 usb_get_ep_timeout(usb_endpoint_t *ep);
-
-//! Clear timeout status for an endpoint
-/*! If an endpoint has timed out, the timeout status must be cleared with this function.
-
-If the endpoint is not timed out, this function does nothing.
-
-\param[in] ep Endpoint
-
-\sa usb_set_ep_timeout()
-*/
-void usb_clear_timeout(usb_endpoint_t *ep);
-
-//! Check timeout status for an endpoint
-/*! Returns 1 if the endpoint has timed out since the last call to usb_clear_timeout().
-
-\param[in] ep Endpoint
-
-\sa usb_set_ep_timeout()
-*/
-int usb_check_timeout(usb_endpoint_t *ep);
 
 #endif
