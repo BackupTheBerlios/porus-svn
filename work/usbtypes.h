@@ -161,11 +161,31 @@ On some ports, a previous request may be in progress, but the endpoint can accep
 //! Endpoint is no longer active
 /*! An endpoint which was configured is no longer configured, and has been made inactive.  Any pending requests have been cancelled, and the endpoint will no longer accept requests.
 
-This occurs when the USB cable is unplugged (this causes a suspend), a suspend or reset is detected, or a configuration change is made.
+This occurs when a reset is detected.  It may also occur when a configuration change is made through the control endpoint.
 
 \note USB_EVT_CANCELLED is not sent in addition to this event, even if requests were cancelled by the reset or suspension.
 */ 
 #define USB_EVT_DECONFIGURED 5
+
+//! Device has been suspended
+/*! The device has been suspended.
+
+This event occurs when a cable is disconnected.  The host can also suspend devices to power them down.
+
+This event applies to the entire device.  All configured endpoints receive it when the bus is suspended.
+
+The suspend state may be temporary; the host can resume without resetting the device.  This will not happen if the cable has been disconnected.  If the cable is disconnected, the host must send a reset when the cable is connected again.  Unfortunately, there is no way for the device to distinguish between a cable disconnect and a forced suspension by the host.
+*/
+#define USB_EVT_SUSPENDED 6
+
+//! Device has been unsuspended
+/*! The device was suspended, but bus activity has resumed.  The device has returned to the state it was in before the suspension occurred.
+
+This event applies to the entire device.  All configured endpoints receive it when the bus is unsuspended.
+
+When a cable is reconnected, this may not occur.  If it does, a DECONFIGURED event may follow immediately, when the reset event occurs.
+*/
+#define USB_EVT_RESUMED 7
 
 /*!
 \defgroup grp_ctl_phases Control transaction phases

@@ -197,6 +197,18 @@ int usb_is_stalled(usb_endpoint_t *ep)
 	return usbhw_is_stalled(ep->id);
 }
 
+static void sendepevt(int e, int stat)
+{
+	usb_endpoint_t *ep;
+
+	ep=usb_get_first_ep(usb_get_config());
+	while(ep) {
+		if (stat>=0) usb_set_epstat(ep,stat);
+		if (ep->data->evt_cb) ep->data->evt_cb(ep,0,0,e);
+		ep=ep->next;
+	}
+}
+
 static int activate_endpoints(int config)
 {
 	usb_endpoint_t *ep;
@@ -300,6 +312,7 @@ void usb_evt_reset(void)
 void usb_evt_suspend(void)
 {
 	usb_set_state(USB_STATE_SUSPENDED);
+	sendepevt(USB_EVT_SUSPENDED,-1);
 }
                                                
 void usb_evt_resume(void)
@@ -307,6 +320,7 @@ void usb_evt_resume(void)
 	if (!flags.suspended) return;
 	flags.suspended=0;
 	if (stateChangeCallback) stateChangeCallback(flags.state);
+	sendepevt(USB_EVT_RESUMED,-1);
 }
 
 void usb_set_state_cb(usb_cb_state cb)
