@@ -1,0 +1,27 @@
+
+var mem_ext = [];
+
+mem_ext[0] = {
+    comment: "External SDRAM",
+    name: "SDRAM",
+    base: 0x020000,
+    len:  0x7D8000,
+    space: "code/data"
+};
+
+var device_regs = {
+    clkmd: 0xb50
+};
+
+var params = {
+    clockRate: 144,
+    catalogName: "ti.catalog.c5500",
+    deviceName: "5507",
+    mem: mem_ext,
+    regs: device_regs
+};
+
+/*
+ * Customize generic platform with parameters specified above.
+ */
+utils.loadPlatform("ti.platforms.generic", params);
