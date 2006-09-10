@@ -1,4 +1,34 @@
 
+/* port/c55x/test/crc32.c -- CRC calculator for PORUS test on MMB0 
+   (TMS320VC5507) */
+
+/* PORUS
+   Portable USB Stack
+
+   PORUS (c) 2004-2006 Texas Instruments Inc.
+   Portions of this file are (c)1995-2002 Mark Adler (see below)
+*/
+
+/* This file is part of PORUS.  You can redistribute and/or modify
+   it under the terms of the Common Public License as published by
+   IBM Corporation; either version 1.0 of the License, or
+   (at your option) any later version.
+
+   PORUS is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   Common Public License for more details.
+
+   You should have received a copy of the Common Public License
+   along with PORUS.  It may also be available at the following URL:
+   
+      http://www.opensource.org/licenses/cpl1.0.txt
+   
+   If you cannot obtain a copy of the License, please contact the 
+   Data Acquisition Products Applications Department at Texas 
+   Instruments Inc.
+*/
+
 /* Based on crc32.c by Mark Adler.  Modifications:
 
 - Removed dynamic CRC table builder
@@ -14,6 +44,34 @@
  * Copyright (C) 1995-2002 Mark Adler
  * For conditions of distribution and use, see copyright notice in zlib.h 
  */
+
+/* copyright notice in zlib.h is the following: */
+
+/* zlib.h -- interface of the 'zlib' general purpose compression library
+  version 1.2.3, July 18th, 2005
+
+  Copyright (C) 1995-2005 Jean-loup Gailly and Mark Adler
+
+  This software is provided 'as-is', without any express or implied
+  warranty.  In no event will the authors be held liable for any damages
+  arising from the use of this software.
+
+  Permission is granted to anyone to use this software for any purpose,
+  including commercial applications, and to alter it and redistribute it
+  freely, subject to the following restrictions:
+
+  1. The origin of this software must not be misrepresented; you must not
+     claim that you wrote the original software. If you use this software
+     in a product, an acknowledgment in the product documentation would be
+     appreciated but is not required.
+  2. Altered source versions must be plainly marked as such, and must not be
+     misrepresented as being the original software.
+  3. This notice may not be removed or altered from any source distribution.
+
+  Jean-loup Gailly jloup@gzip.org
+  Mark Adler madler@alumni.caltech.edu
+
+*/
 
 /* @(#) $Id: crc32.c,v 1.1.1.4 2002/08/01 17:58:15 shebs Exp $ */
 
