@@ -1,0 +1,112 @@
+\documentclass[10pt]{article}
+%\usepackage{graphicx}
+%\usepackage{amssymb}
+%\usepackage{epstopdf}
+\usepackage{alltt}
+\usepackage{color}
+%\DeclareGraphicsRule{.tif}{png}{.png}{`convert #1 `dirname #1`/`basename #1 .tif`.png}
+
+%\textwidth = 6.5 in
+%\textheight = 9 in
+%\oddsidemargin = 0.0 in
+%\evensidemargin = 0.0 in
+%\topmargin = 0.0 in
+%\headheight = 0.0 in
+%\headsep = 0.0 in
+%\parskip = 0.2in
+%\parindent = 0.0in
+
+% Logos
+\newcommand{\porus}{PORUS}
+\newcommand{\iic}{$\mathrm{I^2C}$ }
+
+% Terms etc.
+\newcommand{\gterm}[1]{\textbf{#1}}
+
+% Files
+\newcommand{\fpath}[1]{\textsl{#1}}
+\newcommand{\fext}[1]{\fpath{#1}}
+\newcommand{\ffile}[1]{\fpath{#1}}
+\newcommand{\exe}[1]{\textsl{#1}}
+
+% Examples / format specifications
+\newcommand{\placehold}[1]{\textrm{\textsl{#1}}}
+
+% C / C++
+\newcommand{\ctext}[1]{\textt{#1}}
+\newcommand{\cclass}[1]{\textt{#1}}
+\newcommand{\cnamespace}[1]{\texttt{#1}}
+\newcommand{\cinclude}[1]{\texttt{#1}}
+\newcommand{\cfile}[1]{\ffile{#1}}
+\newcommand{\cfunc}[1]{\textsl{#1}}
+\newcommand{\ccode}[1]{\texttt{#1}}
+%\newenvironment{codelist}{\begin{trivlist} \item[] \begin{verbatim}}
+%  {\end{verbatim} \end{trivlist}}
+\newenvironment{ccodelist}{\begin{alltt}}{\end{alltt}}
+%\newcommand{\cdisplist}[1]{\begin{codelist} #1 \end{codelist}}
+\newcommand{\cdisplist}[1]{\begin{ccodelist} #1 \end{ccodelist}}
+
+% Python
+\newcommand{\pmodule}[1]{\texttt{#1}}
+\newcommand{\pclass}[1]{\texttt{#1}}
+
+%\includeonly{intro,using,templates}
+
+\title{Programmer's Guide to PORUS}
+\author{Michael Ashton}
+
+\begin{document}
+
+\porus\footnote{purus, pura -um, purior -or -us, purissimus -a -um:  adjective: pure, clean, unsoiled; free from defilement/taboo/stain; blameless, innocent; chaste, unpolluted by sex; plain/unadulterated; genuine; absolute; refined; clear, limpid, free of mist/cloud; ringing (voice); open (land); net; simple.  Note that in Latin, an internal `o' is sometimes written as a `u'.  This definition was obtained from the program WORDS, by W. Whittaker.} is a portable USB stack for embedded systems.  It is designed to ease the considerable pain of supporting the USB protocol in embedded software.  Unlike most USB stacks, it's portable to probably any USB hardware, microprocessor, and OS combination; so once you've learned it on one system, you can use it on any other.
+
+This guide explains the concepts behind \porus and gives some tips on using it.  It also explains how to port it.
+
+Although we cover some of the API here, the API reference manual, which is generated from the source code, is the final word on the API.
+
+\section{Concepts}
+
+USB is a host-centric protocol: that is, there is a single central computer, which occupies the root of USB's so-called ``tiered star'', and this computer controls everything on the bus.  The bus is populated at the nodes with slave devices.
+
+Slaves cannot speak unless spoken to.  When the host wants to send data, it sends it; when it wants to read data, it asks the slave to give it data.  The only thing the slave can do is mildly protest by replying with a not-acknowledge.  Slaves can never send data unless the host has asked for it.
+
+The design of \porus reflects this.  Host stimuli are reported through callbacks, and replies are performed through function calls.
+
+\subsection{Organization and porting}
+
+\porus is distributed in source code only, and is written in portable C.  It is split into three sections: for each hardware target there is a different hardware-specific file, and this must be rewritten for each platform that \porus is ported to.  For each project you must generate two files containing enumeration data, among other things, as described in the next section.  The remaining files implement the API and are cross-platform.
+
+\subsection{Static configuration}
+
+One of the more vexing tasks in embedded USB application development is enumeration.  The protocol involved is complex, and enumeration data must be returned in a special format.  Also, on embedded systems, it is all but a requirement to define some things statically; many systems do not have the luxury of dynamic memory allocation.
+
+Because of this, \porus implements static allocation using a code generator called \exe{usbdescgen}.  This program, which is written in Python and runs from a command line, takes a configuration file and generates two source files, a header and a code file, both in portable C.
+
+The configuration file describes, in an easy-to-use syntax, configurations, settings, and endpoints.  It also contains any necessary enumeration data, and configuration parameters.  A fully commented template is provided; usually you need edit it only a little to suit your needs.
+
+The generated source files are compiled with the rest of the stack.  They contain all the necessary data structures and definitions needed to support enumeration, configuration, and endpoints.
+
+\subsection{Data transfer model}
+
+\porus may be thought of as a tape recorder for RAM.\footnote{This analogy may not be the best one.  Magnetic tape recorders are getting scarce.  I expect current readers will be familiar with them, but perhaps some future readers will not be.}  Data is transferred to and from RAM by means of a ``tape head''.  There is one ``tape head'' for each endpoint. 
+
+You control the initial positioning of the head, and you can restrict the amount of tape it will travel over before stopping.  Its advancement across the tape is, in general, controlled by the host.  The process of moving the head is taken care of asynchronously by \porus.
+
+This model does not apply to the control endpoints.  These are handled quite differently, due to their nature.
+
+\subsection{Relationship to embedded operating systems}
+
+\porus is not written with any particular embedded OS in mind.  It depends on the availability of very few things.  It is designed to be included either in a system using only loops and interrupts, or in a system with full threading and thread synchronization facilities, or in systems that fall in between.
+
+To accommodate all these, much of \porus is designed in two stages.  Certain functions are usually run under interrupt; these are designed to take up as little time as possible.  Other functions take a long time; these are separated from the ISR functions, so they can be run in tasks or threads.  This can be done since the ISR functions invoke callbacks which can invoke threads or tasks in an RTOS.  Of course, they can still invoke the lengthy functions directly; either way, this is set up dynamically in the application code.
+
+\section{Quick start}
+
+\section{The configuration file}
+
+\section{Using control endpoints}
+
+\section{Using bulk endpoints}
+
+\section{Porting}
+
+\end{document}
