@@ -17,7 +17,7 @@ svn_path_exists() {
 		rm -f $TMP
 		return 2
 	}
-	grep `basename $1` $TMP >/dev/null
+	grep "^`basename $1`$" $TMP >/dev/null
 	ret=$?
 	rm -f $TMP
 	return $ret
