@@ -25,7 +25,7 @@
 # Data Acquisition Products Applications Department at Texas 
 # Instruments Inc.
 
-VERSION='0.1.0'
+VERSION='baz'
 
 from distutils.core import setup
 setup(name='usbgen',
