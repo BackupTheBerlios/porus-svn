@@ -1,0 +1,404 @@
+\documentclass[a4paper]{book}
+\usepackage{graphicx}
+\usepackage{times}
+%\usepackage{amssymb}
+%\usepackage{epstopdf}
+\usepackage{alltt}
+\usepackage{color}
+\usepackage{tabularx}
+%\DeclareGraphicsRule{.tif}{png}{.png}{`convert #1 `dirname #1`/`basename #1 .tif`.png}
+
+%\textwidth = 6.5 in
+%\textheight = 9 in
+%\oddsidemargin = 0.0 in
+%\evensidemargin = 0.0 in
+%\topmargin = 0.0 in
+%\headheight = 0.0 in
+%\headsep = 0.0 in
+%\parskip = 0.2in
+%\parindent = 0.0in
+
+% Logos
+\newcommand{\porus}{PORUS }
+\newcommand{\iic}{$\mathrm{I^2C}$ }
+
+% Terms etc.
+\newcommand{\gterm}[1]{\textbf{#1}}
+
+% Files
+\newcommand{\fpath}[1]{\textsl{#1}}
+\newcommand{\fext}[1]{\fpath{#1}}
+\newcommand{\ffile}[1]{\fpath{#1}}
+\newcommand{\exe}[1]{\textsl{#1}}
+
+% Examples / format specifications
+\newcommand{\placehold}[1]{\textrm{\textsl{#1}}}
+
+% C / C++
+\newcommand{\ctext}[1]{\textt{#1}}
+\newcommand{\cclass}[1]{\textt{#1}}
+\newcommand{\cnamespace}[1]{\texttt{#1}}
+\newcommand{\cinclude}[1]{\texttt{#1}}
+\newcommand{\cfile}[1]{\ffile{#1}}
+\newcommand{\cfunc}[1]{\textsl{#1}}
+\newcommand{\ccode}[1]{\texttt{#1}}
+%\newenvironment{codelist}{\begin{trivlist} \item[] \begin{verbatim}}
+%  {\end{verbatim} \end{trivlist}}
+\newenvironment{ccodelist}{\begin{alltt}}{\end{alltt}}
+%\newcommand{\cdisplist}[1]{\begin{codelist} #1 \end{codelist}}
+\newcommand{\cdisplist}[1]{\begin{ccodelist} #1 \end{ccodelist}}
+
+% Python
+\newcommand{\pmodule}[1]{\texttt{#1}}
+\newcommand{\pclass}[1]{\texttt{#1}}
+
+%\includeonly{intro,using,templates}
+
+\begin{document}
+
+\title{PORUS Handbook}
+\author{Michael Ashton}
+\maketitle
+
+\porus\footnote{purus, pura -um, purior -or -us, purissimus -a -um:  adjective: pure, clean, unsoiled; free from defilement/taboo/stain; blameless, innocent; chaste, unpolluted by sex; plain/unadulterated; genuine; absolute; refined; clear, limpid, free of mist/cloud; ringing (voice); open (land); net; simple.  Note that in Latin, an internal `o' is sometimes written as a `u'.  This definition was obtained from the program WORDS, by W. Whittaker.} is a portable USB stack for embedded systems.  It is designed to ease the considerable pain of supporting the USB protocol in embedded software.
+
+The essential idea of \porus is to condense the difficult parts of a USB stack into a form which is portable to many systems.  By using \porus, only one API need be learnt, and this API can be used for many different projects. Those parts which cannot be directly ported are cleanly separated, so that they can easily be made up for any combination of USB hardware and operating environment.
+
+This guide explains the concepts behind \porus and gives some tips on using it.  It also explains how to port it.  Although we cover some of the API here, the API reference manual, which is generated from comments in the source code, is the authoritative guide to the API.
+
+\chapter{Introduction}
+
+\porus consists in three parts:
+
+\begin{enumerate}
+\item A \emph{core}, which is written in ANSI C, and portable to any system having a standard C compiler.  The core contains the logic needed to implement the stack.
+\item A \emph{hardware layer}, which communicates with the hardware and operating system as needed.  It is different for each combination of USB peripheral and operating system.
+\item \emph{Generated code}, which is automatically generated from a configuration file for each project.  The generated code is portable and not hardware-dependent.
+\end{enumerate}
+
+To use \porus, one must do the following:
+
+\begin{itemize}
+\item Write a configuration file.  This describes the configurations, interfaces, endpoints, and enumeration data for the peripheral.  A template file is supplied with the distribution.
+\item Provide logic for the control endpoints.  This can be as simple as one or two functions: standard requests can all be handled by the \porus core.
+\item If needed (usually it is), write functions to handle endpoint input and output.
+\item A port for the hardware to be used must exist.  If it does not, one must be written.
+\end{itemize}
+
+Each of these tasks will be described in the chapters that follow.
+
+\section{The design of USB}
+
+The design of \porus naturally reflects the design of USB.  As this design is not obvious from the specification, and as \porus is based on these (sadly) obscured principles, they will be summarised here.
+
+The Universal Serial Bus is a connection scheme and protocol for small computer peripherals.  It specifies connector design, cabling, electrical, logical, and low-level protocol, and for some applications gives specific protocols (these are called ``classes'').
+
+\subsection{Concepts}
+
+USB is a \emph{mailbox-style} communication network.  Its task is to move complete \emph{data packets} between the host and its peripherals.
+
+A USB host sees a USB peripheral something like a collection of mailboxes -- in USB, there are thirty-two, numbered from zero to 31.  A picture of an example collection of mailboxes is shown in Figure !!!.  In USB, these mailboxes are called \emph{endpoints}, but we will call them mailboxes for this illustration.
+
+There are two kinds of mailboxes.  With the first kind, called OUT, the host can put (or ``transmit'') letters into the box, and the peripheral can remove (or ``receive'') letters from the box.  With the other kind, called IN, the peripheral can put letters into the box, and the host can remove them.
+
+The host cannot put and take letters at any time it wants, however.  The host can only put letters into a box, or take them from a box, if the peripheral allows it.  The peripheral can open and shut any of the boxes, except for the box numbered 0, which is special and cannot be closed.  If the host tries to take a letter from a closed box, the peripheral denies it with a special message called NAK, for Not AcKnowledge.
+
+\subsection{Architecture}
+
+A USB network is laid out in \emph{tiered star} fashion.  Everything emanates from a central computer, usually called the \emph{host}, which controls the network, acting as ``master''.  Wires connect USB ports on the computer either to \emph{peripherals} or \emph{hubs}.  A hub is a ``splitter'' which contains a single connector to the host on one side, and multiple connections to peripherals on the other.  Hubs may be connected to other hubs, but only in strict hierarchy; loops are not allowed and will generally cause the network to fail.
+
+Since a USB line can be split, communication with multiple peripherals may occur over a single cable, and the design carries this theme to the lowest level.  A peripheral carries up to 32 \emph{endpoints}, which are either sources for or destinations of data; i.e., endpoints are unidirectional.  Endpoints are grouped into \emph{interfaces}.  Interfaces are grouped into \emph{configurations}, only one of which can be active on a peripheral at any time.  Peripherals are also called \emph{devices}.  USB allows for multiple interfaces so that a single physical device can support multiple disparate functions at once.
+
+Addressing is \emph{enumeration}-based.  Each device is given a unique address through a process of discovery controlled by the host and aided by the hubs.  Uniqueness is established through physical location, although USB is not a physically-addressed system (as is PCI).  In practice, host software is unaware of specific addressee, and identifies devices through unique identifiers.
+
+The unique identifier system is built around a \emph{Vendor ID}, which is assigned by the USB Consortium for a fee.  Below this, a device manufacturer chooses other identifying numbers, and each device can additionally report a serial number.  Host software can identify devices using these and other numbers, which are reported during the enumeration process using special standard messages.
+
+\subsection{Electrical}
+
+Signalling occurs over a single pair of wires.  The pair is a differential pair, and data can be sent in only one direction at a time.  Using a single wiring pair saves money, which is important, as USB must be as cheap or cheaper than the serial, keyboard, and mouse ports it was chiefly designed to replace.
+
+Since there is only one unidirectional pair of wires involved in data transmission, bidirectional transcievers are employed at both ends.  Usually the host or hub transmits; but in certain prescribed situations, the host switches to receive mode, and the peripheral transmits.  This is done under the control of the host.
+
+The signalling is self-clocking.  This is partly achieved through a process called ``bit-stuffing'' in the standard.
+
+Signalling rates are given in baud, and are 1.5Mbaud for low-speed mode, 12Mbaud for full-speed mode, and 480Mbaud for high-speed mode.  Achievable data rates in bits per second vary widely by application, but are typically 30-60\% of these figures due to overhead, timing, and host limitations.  For high-speed USB, the efficiency is typically even lower.
+
+\subsection{Protocol}
+
+
+
+\subsection{Organization and porting}
+
+\porus is distributed in source code only, and is written in portable C.  It is split into three sections: for each hardware target there is a different hardware-specific file, and this must be rewritten for each platform that \porus is ported to.  For each project you must generate two files containing enumeration data, among other things, as described in the next section.  The remaining files implement the API and are cross-platform.
+
+\subsection{Static configuration}
+
+One of the more vexing tasks in embedded USB application development is enumeration.  The protocol involved is complex, and enumeration data must be returned in a special format.  Also, on embedded systems, it is all but a requirement to define some things statically; many systems do not have the luxury of dynamic memory allocation.
+
+Because of this, \porus implements static allocation using a code generator called \exe{usbdescgen}.  This program, which is written in Python and runs from a command line, takes a configuration file and generates two source files, a header and a code file, both in portable C.
+
+The configuration file describes, in an easy-to-use syntax, configurations, settings, and endpoints.  It also contains any necessary enumeration data, and configuration parameters.  A fully commented template is provided; usually you need edit it only a little to suit your needs.
+
+The generated source files are compiled with the rest of the stack.  They contain all the necessary data structures and definitions needed to support enumeration, configuration, and endpoints.
+
+\subsection{Data transfer model}
+
+\porus may be thought of as a tape recorder for RAM.\footnote{This analogy may not be the best one.  Magnetic tape recorders are getting scarce.  I expect current readers will be familiar with them, but perhaps some future readers will not be.}  Data is transferred to and from RAM by means of a ``tape head''.  There is one ``tape head'' for each endpoint. 
+
+You control the initial positioning of the head, and you can restrict the amount of tape it will travel over before stopping.  Its advancement across the tape is, in general, controlled by the host.  The process of moving the head is taken care of asynchronously by \porus.
+
+This model does not apply to the control endpoints.  These are handled quite differently, due to their nature.
+
+\subsection{Relationship to embedded operating systems}
+
+\porus is not written with any particular embedded operating system in mind.  It depends on the availability of very few facilities.  It is designed to be included either in a system using only loops and interrupts, or in a system with full threading and thread synchronization facilities, or in systems that fall in between.
+
+To accommodate all these, much of \porus is designed in two stages.  Certain functions are usually run under interrupt; these are designed to take up as little time as possible.  Other functions take a long time; these are separated from the ISR functions, so they can be run in tasks or threads.  This can be done since the ISR functions invoke callbacks which can invoke threads or tasks in an RTOS.  Of course, they can still invoke the lengthy functions directly; either way, this is set up dynamically in the application code.
+
+\chapter{Quick start}
+
+\section{The configuration file}
+
+\section{Using control endpoints}
+
+\section{Using bulk endpoints}
+
+\chapter{Porting}
+
+% * * * * *
+
+\chapter{Stuff to be sorted}
+
+\subsection{Initialisation sequence}
+
+\begin{enumerate}
+\item Call \ccode{usb\_init()}, passing arguments for the port, if needed
+\item Optionally call \ccode{usb\_set\_state\_cb()} to set the state change callback
+\item Call \ccode{usb\_attach()}, which turns on the USB port (if applicable) and causes the stack to begin listening for packets
+\end{enumerate}
+
+\subsection{Writing to a bulk endpoint}
+
+% * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * 
+
+\chapter{Test suite}
+
+PORUS comes with a suite of tests which verify the operation of the stack.
+
+The test system consists of a program running on a host, and firmware running on the peripheral.  The peripheral program must be built separately for each port.
+
+The tests do not verify compliance with the USB specification, e.g. enumeration, standard control requests, etc.  Programs are freely available which can test these things.
+
+The test firmware portion assumes only that the peripheral device has USB.  It does not require any kind of user interface hardware, such as displays, keyswitches, etc.  All testing is performed entirely through USB.
+
+\section{Test overview}
+
+Currently, the test suite covers the following:
+
+\begin{itemize}
+\item Control send
+\item Control receive
+\item OUT bulk short packet
+\item OUT bulk chained packets with short termination packet
+\item OUT bulk chained packets with zero-length termination packet
+\item OUT timeout
+\item IN bulk short packet
+\item IN bulk chained packets with short termination packet
+\item IN bulk chained packets with zero-length termination packet
+\item IN timeout
+\end{itemize}
+
+The tests are described in the following subsections.  The protocol is described in detail in section \ref{sec:test_protocol}.
+
+\subsection{Control tests}
+
+Although the control subsystem is tested by enumeration process alone, and is used to control the other tests, a pair of commands are provided for separate verification.  One, WVAR, writes a number to the peripheral, and the other, RVAR, retrieves the number.
+
+\subsection{Bulk endpoint tests}
+\label{sec_bulktest}
+
+The bulk tests test the ability of PORUS to transmit data reliably over bulk endpoints.
+
+The host test program performs each test at different lengths so that transactions having one packet, multiple chained packets, and a zero-length termination packet are all performed.
+
+Bulk OUT testing is performed as follows:
+
+\begin{enumerate}
+\item The host sends BLKO to the peripheral.
+\item The host generates a string of random bytes.
+\item The host calculates a CRC-32 on the random bytes.
+\item The host transmits the bytes to the peripheral.
+\item The peripheral receives the random bytes and calculates a CRC-32 on them.
+\item The host polls the peripheral using the STAT command.  It waits for the peripheral to report IDLE.
+\item The host queries the peripheral for the CRC-32 it just calculated using RCRC.
+\item The host verifies that its CRC matches the peripheral's CRC.
+\end{enumerate}
+
+Bulk IN testing is performed as follows:
+
+\begin{enumerate}
+\item The host sends BLKI to the peripheral.
+\item The peripheral generates a string of random bytes.
+\item The peripheral calculates a CRC-32 on the random bytes.
+\item The host polls the peripheral using STAT, waiting for a BITX report.
+\item The host requests packets from the peripheral, which (eventually) responds with the bytes it generated.
+\item The host calculates a CRC-32 on the random bytes.
+\item The host queries the peripheral for the CRC-32 it calculated using RCRC.
+\item The host verifies that its CRC matches the peripheral's CRC.
+\end{enumerate}
+
+\subsection{Bulk IN timeout test}
+\label{sec_bulkinerrortest}
+
+This test checks PORUS' ability to report timeouts and cancel transactions.
+
+\begin{enumerate}
+\item The host sends TMOI to the peripheral.  TMOI specifies a check byte and a number of bytes to transmit.
+\item The peripheral transmits the requested number of the check byte to the host using a three-second timeout.  While it is doing this, it is in BITX status.
+\item The host does not read the bytes.  Instead, it polls with STAT, checking for a TIMO or an IDLE response.
+\item The host then sends another TMOI, giving a different check byte.
+\item The peripheral cancels the previous transaction and sends the requested number of the new check byte to the host.
+\item The host reads these bytes and verifies that they are the second check byte and not the first.
+\end{enumerate}
+
+The behavior of this test depends on the peripheral's packet size and whether it uses DMA.  If the peripheral can completely copy large packets to the USB hardware, PORUS will report that the transaction has finished, and the peripheral will report IDLE.  If, however, enough data is generated that it cannot be completely copied to the hardware until the host has read some of it out, PORUS will generate a timeout.  In either case, the second TMOI should cause the first transaction, which is never completed, to be cancelled.
+
+\subsection{Bulk OUT timeout test}
+\label{sec_bulkouterrortest}
+
+This test checks the ability of PORUS to time out when it has not received enough data from the host using usb\_move().
+
+\begin{enumerate}
+\item The host sends TMOO to the peripheral.  This specifies a number of bytes.
+\item The peripheral waits for the given number of bytes using a three second timeout.  While it is doing this, it is in BORX status.
+\item The host sends no bytes: instead, it polls the peripheral with STAT, waiting for TIMO status.
+\item The peripheral times out, and goes to TIMO status.
+\item The host sends TMOO to the peripheral, again specifying a number of bytes.
+\item The peripheral again waits for the bytes, going to BORX status.
+\item The host sends the promised number of bytes.
+\item The peripheral receives the bytes and goes to IDLE status.
+\item The host polls the peripheral and verifies that it eventually reaches IDLE status.
+\end{enumerate}
+
+\subsection{Bulk OUT chain test}
+
+This tests the PORUS routine usb\_move\_chain().
+
+\begin{enumerate}
+\item The host sends CHTO to the peripheral.
+\item The peripheral waits for a series of chained packets.
+\item The host sends a number of bytes to the peripheral.  The bytes are unimportant.
+\item The peripheral receives the bytes.
+\item The host waits for IDLE status from the peripheral.
+\item The host sends CHTN to the peripheral, which returns the number of bytes it received.
+\item The host verifies that the peripheral received the correct number of bytes.
+\end{enumerate}
+
+\section{Host software}
+
+The host program is called porustest. It is written in Python and uses pyusb to communicate.  It should be portable to any system with a libusb port.
+
+\section{Test protocol}
+\label{sec:test_protocol}
+
+\subsection{Enumeration}
+
+The test program currently enumerates with vendor ID 0xFFFF and device ID 0x0000.  The IDs will be changed if they conflict with another device.
+
+The test firmware enumerates with one configuration having one interface with two bulk endpoints, one IN and one OUT.  Interrupt and isochronous endpoints will be added in future as needed.
+
+\subsection{Control packets}
+
+The test uses control packets for sending commands.
+
+Control packets are all Vendor type, with destination of Interface.  wIndex is zero.  bRequest contains the command number.  For some commands, bValue carries an argument.  Values are returned in big-endian order.
+
+Possible commands are given in Table \ref{tbl_control_commands}.
+
+\begin{table}
+\begin{tabularx}{\textwidth}{|p{1.5cm}|p{1.5cm}|X|X|}
+\hline
+Command code & bRequest field & Command description & bValue field \\ 
+\hline
+\hline
+WVAR & 0x01 & Write peripheral variable & Value to write \\ 
+\hline
+RVAR & 0x02 & Read peripheral variable & Not used \\ 
+\hline
+BLKI & 0x03 & Start Bulk IN test & Length of test data in bytes \\ 
+\hline
+BLKO & 0x04 & Start Bulk OUT test & Length of test data in bytes \\ 
+\hline
+STAT & 0x05 & Check test status & Not used \\ 
+\hline
+RCRC & 0x06 & Get latest CRC & Not used \\ 
+\hline
+TMOI & 0x07 & Start Bulk IN error test & Length of test data in bytes \\
+\hline
+TMOO & 0x08 & Start Bulk OUT error test & Length of test data in bytes \\
+\hline
+\end{tabularx}
+\caption{Control commands}
+\label{tbl_control_commands}
+\end{table}
+
+\subsubsection{WVAR}
+
+Writes the value in bValue to a variable stored in the peripheral.  This value is retrieved with RVAR.
+
+\subsubsection{RVAR}
+
+Reads the value written with WVAR.  If no value has been written yet, the value is undefined.  The value is returned in the data phase.
+
+\subsubsection{BLKI}
+
+Starts the Bulk IN test, using a data block bValue bytes in length.  See Section \ref{sec_bulktest} for details.
+
+\subsubsection{BLKO}
+
+Starts the Bulk OUT test, using bValue bytes of data.  See Section \ref{sec_bulktest} for details.
+
+\subsubsection{STAT}
+
+Returns a status byte indicating the current status of the peripheral.  This is a single byte returned in the data phase.  Possible bytes are given in Table \ref{tbl_stat_return_codes}.
+
+TIMO and EROR are special codes indicating a temporary status.  After reporting them, the board returns to its original status, usually IDLE.
+
+\begin{table}
+\begin{tabularx}{\textwidth}{|l|l|X|}
+\hline
+Status code & Value & Description \\ 
+\hline
+\hline
+IDLE & 0x00 & No test in progress \\ 
+\hline
+BORX & 0x01 & Receiving Bulk OUT test data \\ 
+\hline
+BOCC & 0x02 & Calculating Bulk OUT CRC \\ 
+\hline
+BICC & 0x03 & Generating Bulk IN test data / calculating CRC \\ 
+\hline
+BITX & 0x04 & Transmitting Bulk IN test data \\ 
+\hline
+TIMO & 0x05 & Timed out \\ 
+\hline
+EROR & 0x06 & Error occurred \\
+\hline
+\end{tabularx}
+\caption{STAT return codes}
+\label{tbl_stat_return_codes}
+\end{table}
+
+\subsubsection{RCRC}
+
+Returns the latest calculated CRC as a big-endian 32-bit number.  If no CRC has been calculated, returns 0.
+
+\subsubsection{TMOI}
+
+Starts the Bulk IN error test, using bValue bytes of data.  The test byte is sent in the data phase.  See Section \ref{sec_bulkinerrortest} for details.
+
+\subsubsection{TMOO}
+
+Starts the Bulk OUT error test, using bValue bytes of data.  See Section \ref{sec_bulkouterrortest} for details.
+ 
+\end{document}
