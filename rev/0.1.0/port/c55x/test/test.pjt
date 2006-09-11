@@ -1,0 +1,52 @@
+; Code Composer Project File, Version 2.0 (do not modify or remove this line)
+
+[Project Settings]
+ProjectDir="E:\work\porus\port\c55x\test\"
+ProjectType=Executable
+CPUFamily=TMS320C55XX
+Tool="Compiler"
+Tool="CustomBuilder"
+Tool="DspBiosBuilder"
+Tool="Linker"
+Config="Debug"
+Config="Release"
+
+[Source Files]
+Source="..\..\..\usb.c"
+Source="..\..\..\usbctl.c"
+Source="..\usbhw.c"
+Source="crc32_word.c"
+Source="libmmb0\clk.c"
+Source="libmmb0\flash.c"
+Source="libmmb0\i2c.c"
+Source="libmmb0\mmb0.c"
+Source="libmmb0\spibb.c"
+Source="libmmb0\task.c"
+Source="libmmb0\ui.c"
+Source="main.c"
+Source="test.cdb"
+Source="usbconfig.c"
+
+[Generated Files]
+Source="testcfg.cmd"
+Source="testcfg.s55"
+Source="testcfg_c.c"
+
+["Compiler" Settings: "Debug"]
+Options=-g -fr"$(Proj_dir)\Debug" -i"." -i".." -i"..\..\.." -i"libmmb0" -i"port\c55x\test" -i"port\c55x" -i"..\.." -i"test" -d"_DEBUG" -ml
+
+["Compiler" Settings: "Release"]
+Options=-o2 -fr"$(Proj_dir)\Release"
+
+["Linker" Settings: "Debug"]
+Options=-c -m".\Debug\test.map" -o".\Debug\test.out" -w -x
+
+["Linker" Settings: "Release"]
+Options=-c -m".\Release\test.map" -o".\Release\test.out" -w -x
+
+["testcfg.cmd" Settings: "Debug"]
+LinkOrder=1
+
+["testcfg.cmd" Settings: "Release"]
+LinkOrder=1
+
