@@ -6,7 +6,7 @@
 </div>
 &copy; Texas Instruments Inc. /
 Last updated
-<?php echo gmdate("l r",getlastmod()); ?>
+<?php echo gmdate("r",getlastmod()); ?>
 </div>
 </body>
 </html>
