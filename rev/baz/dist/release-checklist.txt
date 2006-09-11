@@ -1,0 +1,81 @@
+
+PORUS release checklist
+-----------------------
+
+Every time:
+
+o  Update VERSION
+o  Update files where version is used
+o  Update NEWS
+o  Update CHANGELOG
+o  Review README, update if necessary
+o  Build and verify all testers (if possible)
+o  Generate Doxygen docs
+o  Generate latest user manual
+o  Build installers for all platforms
+o  Make source packages (.tar.gz and .zip)
+o  Ensure that text files are in crlf format for .zip files or Windows source distributions
+o  Upload all packages and distributions to the wiki / website
+o  Update the wiki / website with the latest NEWS entry
+o  Post an announcement to mailing lists
+
+Every so often:
+
+o  Check licence, update if nec.
+o  Check copyright dates, update if nec.
+o  Check credits, update if nec.
+
+CHANGELOG format
+----------------
+
+Use dist/genchangelog.pl to make CHANGELOG from the Subversion logs:
+
+  svn log |dist/genchangelog.pl >CHANGELOG
+
+Version branching
+-----------------
+
+Current version is in VERSION.  In the working directory this has the latest version number *with no status letter*.  So the working directory is a mod of that version.
+
+To make a version release:
+
+- Set VERSION to the version you want, e.g.
+
+  echo '0.1.1' >VERSION
+
+- Run mkversion, optionally with a version arg
+
+  dist/mkversion [-v 0.1.1a]
+  
+This does the following:
+
+- Regenerates CHANGELOG
+- With no version arg, runs dist/setversion
+- Commits the repo
+- Branches the new version in SVN:
+  - Copies the working directory to {repo}/rev/`VERSION`
+  - or if -v is given, copies to {repo}/rev/{version arg}
+- Checks out the version dir.
+- With version arg:
+  - Changes VERSION to arg
+  - runs dist/setversion in version working copy
+  - Commits the version branch
+
+For all commits, log message starts with INTERNAL so genchangelog.pl will ignore it.
+
+dist/setversion goes through the source files and changes all the places where version appears.  Files & locs are hard-coded in the file.
+
+Version packaging
+-----------------
+
+Run dist/pack with the version dir.  This does the following:
+
+- Makes a source directory
+- Copies the files to it needed for a source distribution
+- Converts text files to lf if needed
+- Makes a .tar.gz archive
+- Converts text files to crlf if needed
+- Makes a .zip archive
+
+Which files/dirs to copy are hardcoded in pack.
+
