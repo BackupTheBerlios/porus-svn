@@ -6,11 +6,26 @@ PORUS: Portable USB Stack version 0.1.0
 PORUS is a portable USB device stack. It is designed to contain, as far as
 possible, all of the code common to a complete USB device implementation.
 
-PORUS is not finished. Until version 1.0.0, the API may change, perhaps
-drastically. It is not considered stable.
+PORUS is neither stable nor finished.  Until version 1.0.0, the API may 
+change, perhaps significantly.
 
-At this time, only one port is available. It runs on the MMB0 DSP board,
-which uses the Texas Instruments TMS320VC5507 DSP. More ports are planned.
+At this time, only one port is available. It has been tested on the 
+MMB0 DSP board, which uses the Texas Instruments TMS320VC5507 DSP. More 
+ports are planned.
+
+Installation
+------------
+
+PORUS consists of source files and a program called usbgen.  There is no 
+installation procedure for the source files; these are meant to be copied 
+directly to each project.
+
+To install usbgen, you need Python and a shell environment; on Windows,
+cygwin is highly recommended (www.cygwin.com).  Installation is as follows:
+
+1. Change to the usbgen directory
+
+2. Run 'python setup.py install' (on Linux, you need to be root)
 
 Files
 -----
@@ -30,8 +45,8 @@ VERSION - Version number
 Documentation
 -------------
 
-At present, PORUS has no unified handbook. The API is documented in
-formatted (for Doxygen) comments in the header files.
+At present, PORUS has little documentation.  The API is partly documented 
+in Doxygen-formatted comments in the header files.
 
 Contributions to the documentation (or any other part of PORUS) are welcomed
 and solicited.
@@ -52,25 +67,23 @@ package.
 
 To set up PORUS in your project:
 
-1. Install usbgen. See usbgen/INSTALL for instructions. (The PORUS source
-code has no installation procedure; copy it into your project's source
-directory.)
+1. Write a configuration file for usbgen. Use the example configuration 
+   file usbgen/example.usbconfig as a starting point. It contains detailed 
+   comments.
 
-2. Write a configuration file for usbgen. This is most easily done by
-editing the example configuration file usbgen/example.usbconf. It contains
-detailed comments.
+2. In your project's directory, run usbgen on the configuration file you
+   made. This will generate usbconf.c and usbconf.h.  Compile these with 
+   the other PORUS files.
 
-3. In your project's directory, run usbgen on the configuration file you
-made. This will generate usbconf.c and usbconf.h.
+3. Choose a port. If no port is available for your architecture, one will
+   have to be written.
+   
+   (At this time, only one port is available. It runs on the TMS320VC5509A and
+   TMS320VC5507 DSPs using the on-board USB hardware.)
 
-4. Choose a port. If no port is available for your architecture, one will
-have to be written. At this time, only one port is available. It runs on the
-TMS320VC5509A and TMS320VC5507 DSPs using the inbuilt USB peripheral on
-those devices.
+4. Copy the port source files to your project.
 
-5. Copy the port source files to your project.
-
-6. Copy the core source files in src/ to your project.
+5. Copy the core source files in src/ to your project.
 
 About
 -----
