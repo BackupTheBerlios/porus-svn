@@ -5,11 +5,10 @@
 # export a zippable source dir
 # - exports a dir containing exactly those things which go into a source 
 #   archive
-# - dir is placed under <dir>
 
 . ./release_config.sh
 
-sourcedir=$2/$sourcename
+sourcedir=$2
 
 echo -n "Getting release directory ... "
 svn -q export $release_url $sourcedir 1>/dev/null || {

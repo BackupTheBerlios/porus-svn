@@ -1,5 +1,5 @@
 
-# cnfparse.py -- USB enumeration config file parser
+# usbgenpkg/cnfparse.py -- USB enumeration config file parser
 
 # PORUS
 # Portable USB Stack

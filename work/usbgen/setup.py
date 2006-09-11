@@ -30,5 +30,6 @@ VERSION='0.1.0'
 from distutils.core import setup
 setup(name='usbgen',
       version=VERSION,
-      scripts=['usbgen']
+      scripts=['usbgen'],
+      packages=['usbgenpkg']
       )

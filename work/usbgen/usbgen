@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+#:mode=python:
 
 # usbgen.py -- USB enumeration code generator
 
@@ -802,7 +803,8 @@ void usb_set_serial_number(usb_data_t *bytes)
 # ========================================================================
 
 from optparse import OptionParser
-import sys,cnfparse
+import sys
+from usbgenpkg import cnfparse
 
 p=OptionParser(usage="%prog [options] configfile")
 p.add_option('-o','--output',default='usbconfig',

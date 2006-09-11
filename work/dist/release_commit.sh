@@ -10,6 +10,7 @@
 . ./release_config.sh
 
 relmsg="release.sh [$version]: copied release"
+workdir=$2
 
 echo -n "Checking whether release exists in repository ... "
 svn_path_exists $release_url && { echo "yes"; echo "Release already exists"; exit 1; }
@@ -23,16 +24,28 @@ svn -q copy -m "$relmsg" $repo/$work $release_url || {
 }
 echo "done"
 
-echo -n "Checking out release to $2 ..."
-svn -q co $release_url $2
+echo -n "Checking out release to $workdir ... "
+svn -q co $release_url $workdir || {
+	echo "error"
+	echo "Could not check out release"
+	exit 1
+}
 echo "done"
 
-echo -n "Updating versions ..."
-./release_version $1 $2
+echo -n "Updating versions ... "
+./release_version.sh $1 $workdir || {
+	echo "error"
+	echo "Could not update versions"
+	exit 1
+}
 echo "done"
 
-echo -n "Committing changes ..."
-svn -q ci -m "release.sh [$version]: updated version numbers" $2
+echo -n "Committing changes ... "
+svn -q ci -m "release.sh [$version]: updated version numbers" $workdir || {
+	echo "error"
+	echo "Could not commit changes"
+	exit 1
+}
 echo "done"
 
-echo "Release directory is available at $2"
+echo "Release directory is available at $workdir"
