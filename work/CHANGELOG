@@ -1,4 +1,11 @@
 
+2006-09-12  Michael Ashton <ashton_michael@ti.com>
+
+	- C55X port: Unstall now sets the endpoint's toggle bit back to 0
+	  as required by the spec.  This makes reconnection possible in some applications
+
+	- Unstall causes a cancel on any pending transactions
+
 2006-05-22  Michael Ashton <ashton_michael@ti.com>
 
 	Added suspend & resume endpoint events

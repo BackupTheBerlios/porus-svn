@@ -27,7 +27,7 @@ tgzarchive=$tempdir/${sourcename}.tgz
 }
 
 echo -n "Creating .tgz at $tgzarchive ... "
-tar czf $tgzarchive $releasedir || {
+tar czf $tgzarchive -C $tempdir $sourcename || {
 	echo "error"
 	echo "Could not create .tgz"
 	exit 1

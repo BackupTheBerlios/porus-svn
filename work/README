@@ -1,6 +1,6 @@
 
 =========================
-PORUS: Portable USB Stack version 0.1.0
+PORUS: Portable USB Stack version 0.1.1
 =========================
 
 PORUS is a portable USB device stack. It is designed to contain, as far as
@@ -41,6 +41,7 @@ NEWS - Version news
 CHANGELOG - Detailed change log
 README - This file
 VERSION - Version number
+LICENSE - Common Public License 1.0
 
 Documentation
 -------------

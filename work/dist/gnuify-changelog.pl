@@ -32,7 +32,7 @@ sub prent {
   #print join("^^^",@_);
   my @ent=@_;
   for my $f (@filtered_entries) {
-    for (@ent) { 
+    for (@ent) {
       return if m/^\t$f/;
     }
   }
