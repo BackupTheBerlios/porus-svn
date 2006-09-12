@@ -1,0 +1,14 @@
+
+PORUS News
+==========
+
+*** Version 0.1.1 -- 12 Sep 2006
+
+- C55X port: Unstall now sets the endpoint's toggle bit back to 0
+  as required by the spec.  This makes reconnection possible in some applications, and brings us closer to spec compliance
+
+- Unstall causes a cancel on any pending transactions
+
+*** Version 0.1.0 -- 10 Sep 2006
+
+First packaged release.  Documentation incomplete.  Actively being tested.
