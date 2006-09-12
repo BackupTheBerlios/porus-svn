@@ -1,3 +1,4 @@
+// :wrap=soft:
 
 /* usb.h -- main PORUS header */
 
@@ -29,8 +30,6 @@
 
 #ifndef GUARD_usb_h
 #define GUARD_usb_h
-
-// :wrap=soft:
 
 // usbconfig.h is generated and must appear somewhere in the include path
 // this is the user's responsibility

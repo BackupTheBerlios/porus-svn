@@ -1,3 +1,4 @@
+// :wrap=soft:
 
 /* usbhw.h -- declarations & prototypes for ports */
 
@@ -30,7 +31,6 @@
 #ifndef GUARD_usbhw_h
 #define GUARD_usbhw_h
 
-/* :wrap=soft: */
 #include "usbpriv.h"
 //#include <portconf.h>
 
@@ -142,11 +142,11 @@ int usbhw_tx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len);
 //! Request a transmission
 /*! Causes the hardware to prepare to transmit the \p len bytes at \p data packet by packet.  A short packet is not appended.  The packet size is the endpoint's maximum.
 
-Since reception is controlled by the host, there is no guarantee that the data will go out immediately; this function is therefore a request, and must not wait for the data to actually be transmitted.  When all of the data has been transmitted, the port must call usb_evt_done().
+Since transmission is controlled by the host, there is no guarantee that the data will go out immediately; this function is therefore a request, and must not wait for the data to actually be transmitted.  When all of the data has been transmitted, the port must call usb_evt_done().
 
 If the transmission request cannot be accepted, -1 is returned.
 
-The port must set the endpoint status to USB_EPSTAT_XFER when it prepares the endpoint.  When the reception has finished, the port must set the endpoint status to USB_EPSTAT_IDLE, if no other transactions are pending.
+The port must set the endpoint status to USB_EPSTAT_XFER when it prepares the endpoint.  When the transmission has finished, the port must set the endpoint status to USB_EPSTAT_IDLE, if no other transactions are pending.
 
 If a timeout occurs, the port must call usb_evt_done() with the proper status.
 
@@ -215,7 +215,7 @@ It is usually not possible to stop a packet transmission.  However, it should be
 
 This function is called either because the user explicitly requested a cancellation, or because a timeout occurred.  These may be distinguished by the endpoint's status at the time of the call.  If the user requests a cancellation, the endpoint will have status USB_EPSTAT_CANCELLING; if a timeout occurs, the endpoint will have status USB_EPSTAT_TIMEOUT.
 
-When all requests have been successfully cancelled, and the endpoint is ready for a new request, usb_evt_done() must be called with the proper event: USB_EVT_TIMEOUT or USB_EVT_CANCELLED.  Note that this may be done in a DMA interrupt service routine, and not by this function.
+When all requests have been successfully cancelled, and the endpoint is ready for a new request, usb_evt_done() must be called with the proper event: USB_EVT_TIMEOUT or USB_EVT_CANCELLED.  (This may be done in a DMA interrupt service routine.)
 
 \param ep Endpoint to cancel on
 */

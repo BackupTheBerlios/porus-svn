@@ -214,6 +214,8 @@ int usb_stall(usb_endpoint_t *ep)
 int usb_unstall(usb_endpoint_t *ep)
 {
 	if (!ep) return -1;
+	if (usb_get_epstat(ep)==USB_EPSTAT_XFER)
+		usb_cancel(ep);
 	usbhw_unstall(ep->id);
 	usb_set_epstat(ep,USB_EPSTAT_IDLE);
 	return 0;

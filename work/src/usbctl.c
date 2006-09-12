@@ -1,32 +1,4 @@
 
-/* usbctl.c -- standard control request logic */
-
-/* PORUS
-   Portable USB Stack
-
-   (c) 2004-2006 Texas Instruments Inc.
-*/
-
-/* This file is part of PORUS.  You can redistribute and/or modify
-   it under the terms of the Common Public License as published by
-   IBM Corporation; either version 1.0 of the License, or
-   (at your option) any later version.
-
-   PORUS is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   Common Public License for more details.
-
-   You should have received a copy of the Common Public License
-   along with PORUS.  It may also be available at the following URL:
-   
-      http://www.opensource.org/licenses/cpl1.0.txt
-   
-   If you cannot obtain a copy of the License, please contact the 
-   Data Acquisition Products Applications Department at Texas 
-   Instruments Inc.
-*/
-
 #include "usbhw.h"
 
 #define USB_DESC_DEVICE 1
@@ -127,7 +99,7 @@ static int usb_ctl_std_get_status(void)
 		if (usb_get_state()==USB_STATE_ADDRESS)
 			if (usb_setup.index!=0) return -1;
 		epn=usb_setup.index;
-		if (epn&0x80) epn=(epn&15)+8;
+		if (epn&0x80) epn=(epn&15)+16;
 		ret=usb_is_stalled(usb_get_ep(usb_get_config(),epn));
 		if (ret<0) return -1;
 		reply_u16(ret==1?0x100:0);
@@ -146,7 +118,7 @@ static int usb_ctl_std_clear_feature(void)
 	case FEATURE_ENDPOINT_HALT:
 		if (usb_setup.recipient!=USB_RCPT_EP) return -1;
 		epn=usb_setup.index;
-		if (epn&0x80) epn=(epn&15)+8;
+		if (epn&0x80) epn=(epn&15)+16;
 		if (usb_unstall(usb_get_ep(usb_get_config(),epn)))
 			return -1;
 		break;
@@ -169,7 +141,7 @@ static int usb_ctl_std_set_feature(void)
 	case FEATURE_ENDPOINT_HALT:
 		if (usb_setup.recipient!=USB_RCPT_EP) return -1;
 		epn=usb_setup.index;
-		if (epn&0x80) epn=(epn&15)+8;
+		if (epn&0x80) epn=(epn&15)+16;
 		if (usb_stall(usb_get_ep(usb_get_config(),epn)))
 			return -1;
 		break;

@@ -1,3 +1,4 @@
+// :mode=c:wrap=soft:
 
 /* usbtypes.h -- data structures */
 
@@ -29,8 +30,6 @@
 
 #ifndef GUARD_usbtypes_h
 #define GUARD_usbtypes_h
-
-// :mode=c:wrap=soft:
 
 #include "types.h"
 

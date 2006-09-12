@@ -1,3 +1,4 @@
+// :wrap=soft:
 
 /* priv.h -- private definitions */
 
@@ -29,8 +30,6 @@
 
 #ifndef GUARD_usbpriv_h
 #define GUARD_usbpriv_h
-
-// :wrap=soft:
 
 #include "usb.h"
 
