@@ -1,4 +1,3 @@
-
 /* port/c55x/usbhw.c -- C55x port */
 
 /* PORUS
@@ -36,7 +35,32 @@
 #include <clk.h>
 #include <stdlib.h>
 
-//#include "libmmb0/ui.h"
+#if 0
+static int toggleok;
+
+#include "libmmb0/ui.h"
+/* nak out x = f (5)
+   nak out y = b (1)
+   toggle out = a (0) (on=1)
+   nak in x = e (4)
+   nak in y = c (2)
+   toggle in = g (6) (on=1)
+   dma go in = d (3)
+   pgfedcba
+*/
+void showtoggle(void)
+{
+	u8 d=0;
+	if (USBOCNF(1)&USBOCNF_TOGGLE) d|=1;
+	if (USBOCTX(1)&USBOCTX_NAK) d|=(1<<5);
+	if (USBOCTY(1)&USBOCTY_NAK) d|=(1<<1);
+	if (USBICNF(9)&USBICNF_TOGGLE) d|=(1<<6);
+	if (USBICTX(9)&USBICTX_NAK) d|=(1<<4);
+	if (USBICTY(9)&USBICTY_NAK) d|=(1<<2);
+	if (USBIDCTL(9)&USBIDCTL_GO) d|=(1<<3);
+	led_set(d);
+}
+#endif
 
 #ifdef USBHW_DMALOG
 static u16 USBHW_DMA_LOGSIZE;
@@ -100,7 +124,7 @@ typedef struct usb_packet_req_t {
 
 struct c55x_params params;
 
-static void *sys_malloc(u32 len)
+/*static void *sys_malloc(u32 len)
 {
 	return MEM_alloc(0,len,0);
 }
@@ -108,7 +132,7 @@ static void *sys_malloc(u32 len)
 static void sys_free(void *mem)
 {
 	MEM_free(0,mem,0);
-}
+}*/
 
 /* timeouts -------------------- */
 
@@ -358,14 +382,6 @@ void usbhw_ctl_read_handshake(void)
 
 // ---------------------------------------------------------------------
 
-static void showtoggle(void)
-{
-	if (USBICNF(9)&USBICNF_TOGGLE)
-		led_showdig(1);
-	else
-		led_showdig(0);
-}
-
 void usbhw_cancel(usb_endpoint_t *ep)
 {
 	int epn=ep->id;
@@ -408,8 +424,12 @@ static void dmaGo(int epn, u32 data, u16 len, int chain)
 	/* this should not even work, but in fact it's required */
 	USBODCT(epn)=0;
 	USBODSIZ(epn)=len;
-	//USBOCTX(epn)=USBOCTX_NAK|len;
-	//USBOCTY(epn)=USBOCTY_NAK|len;
+	if (epn<8) {
+		if (USBOCNF(epn)&USBOCNF_TOGGLE)
+			USBOCTY(epn)=0;
+		else
+			USBOCTX(epn)=0;
+	}
 	if (chain)
 		USBODCTL(epn)=USBODCTL_GO|USBODCTL_OVF|USBODCTL_END|USBODCTL_SHT;
 	else
@@ -425,27 +445,31 @@ static void dmaGo(int epn, u32 data, u16 len, int chain)
 	ep->data->reqlen=len;\
 	ep->data->actlen=0;\
 	usb_set_epstat(ep,USB_EPSTAT_XFER); \
-	dmaGo(ep->id,(u32)(data)<<1,len,CHAIN);\
-	return 0;
+	dmaGo(ep->id,(u32)(data)<<1,len,CHAIN)
 
 int usbhw_tx(usb_endpoint_t *ep, usb_data_t *data, u16 len)
 {
-	RXTX(0)
+	RXTX(0);
+	//if (toggleok) { showtoggle(); toggleok=0; }
+	return 0;	
 }
 
 int usbhw_rx(usb_endpoint_t *ep, usb_data_t *data, u16 len)
 {
-	RXTX(0)
+	RXTX(0);
+	return 0;
 }
 
 int usbhw_tx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len)
 {
-	RXTX(1)
+	RXTX(1);
+	return 0;
 }
 
 int usbhw_rx_chain(usb_endpoint_t *ep, usb_data_t *data, u16 len)
 {
-	RXTX(1)
+	RXTX(1);
+	return 0;
 }
 
 #undef RXTX
@@ -486,7 +510,7 @@ static void isrDMA(int epn, int rld)
 	//y=USBICTY(epn);
 	usb_set_epstat(ep,USB_EPSTAT_IDLE);
 	usb_evt_done(ep,ep->data->buf,ep->data->actlen,USB_EVT_READY);
-	//showtoggle();
+	//if (epn>8) { showtoggle(); }
 }
 
 // all we do here is update the timeout
@@ -580,11 +604,81 @@ void usbhw_stall(int epn)
 		USBICNF(epn)|=USBICNF_STALL;
 }
 
+/* this routine flips an IN DMA's internal toggle bit by running a 
+dummy DMA transfer as follows:
+
+1. sets X & Y NAKs to 1
+2. disable DMA interrupt
+3. sets up DMA for a byte count 2, address is a local var
+4. runs DMA, polling done bit
+5. sets X & Y NAKs to 1 again
+6. flips TOGGLE bit
+7. reenables DMA interrupt
+*/
+static void flip_in_toggle(int epn)
+{
+	volatile short dummy;
+	int i;
+
+	USBIDIE&=~(1<<(epn-8));
+	USBICTX(epn)=USBICTX_NAK;
+	USBICTY(epn)=USBICTY_NAK;
+	dmaGo(epn+8,((u32)(&dummy))<<1,1,0);
+	for (i=0;i<32767;++i)
+		if (!(USBIDCTL(epn)&USBIDCTL_GO)) break;
+	USBICTX(epn)=USBICTX_NAK;
+	USBICTY(epn)=USBICTY_NAK;
+	USBICNF(epn)^=USBICNF_TOGGLE; // oh yes, this is weird
+	USBIDGIF=(1<<(epn-8));
+	USBIDIE|=(1<<(epn-8));
+}
+
+/* this routine flips an OUT DMA's internal toggle bit by running a 
+dummy DMA transfer as follows:
+
+1. sets X & Y NAKs to 0
+2. disable DMA interrupt
+3. sets up DMA for a byte count 2, address is a local var
+4. runs DMA
+5. sets X & Y NAKs to 1
+6. polls GO bit
+7. sets NAKs back to 0
+8. flips TOGGLE bit
+9. reenables DMA interrupt
+*/
+static void flip_out_toggle(int epn)
+{
+	volatile short dummy;
+	int i;
+
+	USBODIE&=~(1<<(epn));
+	USBOCTX(epn)=0;
+	USBOCTY(epn)=0;
+	dmaGo(epn,((u32)(&dummy))<<1,1,0);
+	USBOCTX(epn)=USBICTX_NAK;
+	USBOCTY(epn)=USBICTY_NAK;
+	for (i=0;i<32767;++i)
+		if (!(USBIDCTL(epn)&USBIDCTL_GO)) break;
+	USBOCTX(epn)=0;
+	USBOCTY(epn)=0;
+	USBOCNF(epn)^=USBOCNF_TOGGLE; // oh yes, this is weird
+	USBODGIF=(1<<(epn));
+	USBODIE|=(1<<(epn));
+}
+
 void usbhw_unstall(int epn)
 {
 	if (epn>15) epn-=8;
-	if (!(USBICNF(epn)&USBICNF_ISO))
+	if (!(USBICNF(epn)&USBICNF_ISO)) {
 		USBICNF(epn)&=~USBICNF_STALL;
+		if (epn>=8) {
+			if (USBICNF(epn)&USBICNF_TOGGLE)
+				flip_in_toggle(epn);
+		} else {
+			if (USBOCNF(epn)&USBOCNF_TOGGLE)
+				flip_out_toggle(epn);
+		}
+	}
 }
 
 int usbhw_is_stalled(int epn)
@@ -618,6 +712,7 @@ void usbhw_set_address(u8 adr)
 	USBADDR=adr;
 }
 
+#if 0
 /* Returns the buffer base adr assigned to the given endpoint, 
 relative to the base address of the USB module.  The address is 
 a byte address.  The first usable address is 0x80 since the 
@@ -636,6 +731,7 @@ static u16 usbhw_get_ep_buf_ofs(u8 epn)
 		b=((u16)(USBOBAX(epn)))<<4;
 	return b;
 }
+#endif
 
 /* Sets the buffer base addresses and sizes for the X and Y buffers for 
 the given endpoint.  The address is a byte address and is relative 
@@ -694,13 +790,8 @@ static int activate_ep(usb_endpoint_t *ep)
 	} else {
 		USBICNF(epn)|=USBICNF_DBUF;
 	}
-	if (epn>8) {
-		USBICTX(epn)=USBICTX_NAK;
-		USBICTY(epn)=USBICTY_NAK;
-	} else {
-		USBOCTX(epn)=0;
-		USBOCTY(epn)=0;
-	}
+	USBICTX(epn)=USBICTX_NAK;
+	USBICTY(epn)=USBICTY_NAK;
 	USBIDCTL(epn)=0;
 	USBIDADH(epn)=0;
 	USBIDADL(epn)=0;
@@ -739,10 +830,10 @@ void usbhw_deactivate_eps(int cnf)
 			USBICNF(ep->id-8)=0;
 		else
 			USBOCNF(ep->id)=0;
-		if (ep->data->hwdata) {
+/*		if (ep->data->hwdata) {
 			sys_free(ep->data->hwdata);
 			ep->data->hwdata=0;
-		}
+		}*/
 		ep=ep->next;
 	}
 }
